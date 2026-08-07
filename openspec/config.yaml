@@ -1,0 +1,50 @@
+schema: spec-driven
+
+context: |
+  Project: LocalMcpTools — local MCP toolset for VS Code agents
+  Target agents (current): codebuddy, GitHub Copilot
+  Target agents (future): workbuddy, minimax code
+  Platform: Windows only (Linux/macOS interfaces stubbed, not implemented)
+  IDE: VS Code only
+
+  Stack:
+    - Python 3.11+
+    - MCP Python SDK (version locked in change-1 spike)
+    - FastMCP / FastAPI / uvicorn
+    - SQLite (WAL) for audit + settings
+    - chardet for encoding detection
+    - psutil for process tree
+    - uiautomation for UI Automation
+    - Angular 19 + Angular Material for the local browser UI
+
+  Authority model (do NOT regress):
+    - Default capability profile is `observe` (read-only).
+    - Side-effects require server-side profile + workspace scope + short-lived approval.
+    - Agent-supplied fields (cwd, agent, allow_dangerous) are audit hints,
+      NOT authority. They never escalate permissions.
+    - Transport: stdio by default; Streamable HTTP only when sharing across agents
+      (with Origin check + local bearer secret).
+    - Output goes to protected artifacts with handles, never pasted verbatim
+      into agent context. Sensitive values are redacted before persistence.
+
+  Reference docs:
+    - docs/requirements.md — why
+    - docs/implementation-plan.md — how
+
+rules:
+  proposal:
+    - State which phases of implementation-plan.md this change covers
+    - Identify any deviation from the plan and justify it
+    - List affected components (tools/, execution/, persistence/, safety/, ui/)
+  specs:
+    - Use Given/When/Then for each scenario
+    - Each tool spec must include: name, inputs, returns, error codes, audit fields
+    - Security-sensitive specs must call out profile + approval requirements
+  design:
+    - Show module/folder layout for new code
+    - Identify new SQLite tables or schema migrations
+    - Note any new third-party dependencies and why
+  tasks:
+    - Use checkbox format `- [ ]` so /opsx:apply can tick them off
+    - Group into 1.x, 2.x, ... sub-phases matching implementation-plan.md
+    - End with explicit DoD items lifted from the plan
