@@ -19,12 +19,27 @@ and for agents that want to enumerate.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 from pathlib import Path
 from typing import Any, cast
 
+from ..execution.context import current_gate
+from ..execution.runner import run
+from ..persistence import artifacts
+from ..policy.approval import (
+    ApprovalDigestMismatch,
+    ApprovalExpired,
+    ApprovalNotApproved,
+    consume,
+    request,
+)
+from ..policy.authorize import Decision, check
+from ..policy.digest import digest_for
+from ..policy.profile import current
 from ..workspaces import inspect as ws_inspect
+from ..workspaces import presets
 from ..workspaces.registry import (
     InvalidPath,
     WorkspaceNotRegistered,
@@ -33,6 +48,7 @@ from ..workspaces.registry import (
     register,
     resolve,
 )
+from ._common import ToolMeta, ToolResponse
 from ._errors import fail
 
 # Cap on how many bytes we'll read from a single file while grepping.
@@ -251,6 +267,72 @@ def workspace_search_text(args: dict[str, Any]) -> Any:
     }
 
 
+def workspace_git_status(args: dict[str, Any]) -> Any:
+    """Return Git status without requiring an execution profile or approval."""
+    ws = _resolve_workspace(args.get("workspace_id"), "workspace.git_status")
+    root = _require_workspace_root(ws, "workspace.git_status")
+    return ws_inspect.git_status(root)
+
+
+def workspace_run_test(args: dict[str, Any]) -> ToolResponse:
+    return _run_preset(args, "run_test")
+
+
+def workspace_build(args: dict[str, Any]) -> ToolResponse:
+    return _run_preset(args, "build")
+
+
+def workspace_lint(args: dict[str, Any]) -> ToolResponse:
+    return _run_preset(args, "lint")
+
+
+def _run_preset(args: dict[str, Any], action: str) -> ToolResponse:
+    tool = f"workspace.{action}"
+    ws = _resolve_workspace(args.get("workspace_id"), tool)
+    root = _require_workspace_root(ws, tool)
+    profile = current(ws.id)
+    capability = f"{profile.value}:{tool}"
+    if check(profile, capability) is Decision.DENY:
+        fail(code="insufficient_capability", message="workspace profile cannot execute presets", tool=tool, audit_id="pending", run_id="pending", workspace_id=ws.id)
+    project_type = ws_inspect.detect_project_type(root)
+    filter_text = args.get("filter")
+    if filter_text is not None and not isinstance(filter_text, str):
+        fail(code="invalid_args", message="filter must be a string", tool=tool, audit_id="pending", run_id="pending", workspace_id=ws.id)
+    try:
+        argv = presets.resolve(project_type, action, root, cast(str | None, filter_text))
+    except presets.NoPreset as exc:
+        fail(code="no_preset", message=str(exc), tool=tool, audit_id="pending", run_id="pending", workspace_id=ws.id, next_actions=["configure preset or fall back to shell.run_command with approval"])
+    preview = {"preset": action, "command_resolved": argv, "cwd": ws.canonical_root}
+    approval_id = args.get("approval_id")
+    digest = digest_for(tool, args, ws.id, profile.value)
+    if not isinstance(approval_id, str) or not approval_id:
+        item = request(ws.id, capability, args, profile=profile.value)
+        fail(code="approval_required", message="human approval is required before running this preset", tool=tool, audit_id="pending", run_id="pending", workspace_id=ws.id, approval_id=item.id, data=preview)
+    approval_id = cast(str, approval_id)
+    try:
+        consume(approval_id, digest)
+    except ApprovalDigestMismatch as exc:
+        fail(code="approval_digest_mismatch", message=str(exc), tool=tool, audit_id="pending", run_id="pending", workspace_id=ws.id)
+    except ApprovalExpired as exc:
+        fail(code="approval_expired", message=str(exc), tool=tool, audit_id="pending", run_id="pending", workspace_id=ws.id)
+    except ApprovalNotApproved:
+        fail(code="approval_required", message="approval is still pending", tool=tool, audit_id="pending", run_id="pending", workspace_id=ws.id, approval_id=approval_id)
+    timeout_ms = int(args.get("timeout_ms") or 120_000)
+    result = asyncio.run(run(argv, cwd=ws.canonical_root, timeout_ms=timeout_ms, gate=current_gate()))
+    handle = artifacts.write(result.output)
+    meta = ToolMeta(tool=tool, duration_ms=0, audit_id="pending", run_id="pending", workspace_id=ws.id, output_handle=handle)
+    if result.timed_out:
+        return ToolResponse.error_response(code="timed_out", message="preset exceeded timeout", meta=meta)
+    return ToolResponse.ok_response(data={**preview, "exit_code": result.exit_code}, meta=meta)
+
+
+def _require_workspace_root(ws: Any, tool: str) -> Path:
+    root = Path(ws.canonical_root)
+    if not root.is_dir():
+        fail(code="invalid_path", message=f"workspace directory no longer exists: {ws.canonical_root!r}", tool=tool, audit_id="pending", run_id="pending", workspace_id=ws.id, suggestion="re-register the directory")
+    return root
+
+
 # --- helpers --------------------------------------------------------------
 
 
@@ -265,4 +347,8 @@ __all__ = [
     "workspace_list",
     "workspace_inspect",
     "workspace_search_text",
+    "workspace_git_status",
+    "workspace_run_test",
+    "workspace_build",
+    "workspace_lint",
 ]

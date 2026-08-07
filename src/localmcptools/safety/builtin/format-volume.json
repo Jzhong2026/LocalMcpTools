@@ -1,0 +1,1 @@
+{"id":"block-format-volume","severity":"critical","suggestion":"Disk formatting is blocked.","match":{"type":"any_of","rules":[{"cmd_name":"Format-Volume"},{"cmd_name":"format"},{"cmd_name":"diskpart"}]}}

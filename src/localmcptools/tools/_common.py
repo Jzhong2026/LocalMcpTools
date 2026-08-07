@@ -41,6 +41,13 @@ ERR_WORKSPACE_NOT_REGISTERED = "workspace_not_registered"
 ERR_ARTIFACT_NOT_FOUND = "artifact_not_found"
 ERR_REDACTION_FAILED = "redaction_failed"
 ERR_BINARY_FILE = "binary_file"
+ERR_INSUFFICIENT_CAPABILITY = "insufficient_capability"
+ERR_APPROVAL_DIGEST_MISMATCH = "approval_digest_mismatch"
+ERR_APPROVAL_EXPIRED = "approval_expired"
+ERR_DENIED_BY_RULE = "denied_by_rule"
+ERR_QUEUE_TIMEOUT = "queue_timeout"
+ERR_TIMED_OUT = "timed_out"
+ERR_NO_PRESET = "no_preset"
 
 STANDARD_ERROR_CODES: tuple[str, ...] = (
     ERR_INTERNAL_ERROR,
@@ -52,6 +59,13 @@ STANDARD_ERROR_CODES: tuple[str, ...] = (
     ERR_ARTIFACT_NOT_FOUND,
     ERR_REDACTION_FAILED,
     ERR_BINARY_FILE,
+    ERR_INSUFFICIENT_CAPABILITY,
+    ERR_APPROVAL_DIGEST_MISMATCH,
+    ERR_APPROVAL_EXPIRED,
+    ERR_DENIED_BY_RULE,
+    ERR_QUEUE_TIMEOUT,
+    ERR_TIMED_OUT,
+    ERR_NO_PRESET,
 )
 
 

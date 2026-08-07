@@ -6,11 +6,11 @@
 
 ## 2.1 Profile registry
 
-- [ ] `policy/profile.py`: enum of 4 profiles + `current(workspace_id)` reader
-- [ ] `policy/profile.py`: default `observe` per workspace
-- [ ] `policy/profile.py`: raises on attempt to change profile from inside a tool
-- [ ] Unit test: each profile's allowed/forbidden matrix
-- [ ] Unit test: agent-supplied `profile` arg is ignored
+- [x] `policy/profile.py`: enum of 4 profiles + `current(workspace_id)` reader
+- [x] `policy/profile.py`: default `observe` per workspace
+- [x] `policy/profile.py`: raises on attempt to change profile from inside a tool
+- [ ] Unit test: each profile's allowed/forbidden matrix (lands with `authorize.py`)
+- [x] Unit test: agent-supplied `profile` arg is ignored
 
 ## 2.2 Approval data model
 

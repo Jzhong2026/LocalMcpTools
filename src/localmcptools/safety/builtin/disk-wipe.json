@@ -1,0 +1,1 @@
+{"id":"block-disk-wipe","severity":"critical","suggestion":"Disk wiping is blocked.","match":{"type":"any_of","rules":[{"cmd_name":"cipher","args_match":"/w"},{"regex":"dd\\s+if=.*of=/dev/(sd|nvme|hd)"}]}}

@@ -1,0 +1,1 @@
+{"id":"block-kill-protected","severity":"critical","suggestion":"Terminating protected system processes is blocked.","match":{"type":"any_of","rules":[{"regex":"(taskkill|Stop-Process).*\\b(csrss|lsass|smss|wininit)\\b"}]}}

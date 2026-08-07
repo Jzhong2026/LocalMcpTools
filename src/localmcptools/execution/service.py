@@ -39,6 +39,8 @@ from typing import Any
 from ..persistence import audit, db
 from ..safety.redact import redact
 from ..tools._common import ToolMeta, ToolResponse
+from .concurrency import ConcurrencyGate
+from .context import use_gate
 from .tool_error import ToolErrorResponse as _ToolErrorResponse
 
 _log = logging.getLogger(__name__)
@@ -139,6 +141,7 @@ class ToolExecutionService:
         self._profile = profile
         self._policy_version = policy_version
         self._tools: dict[str, _Registration] = {}
+        self._execution_gate = ConcurrencyGate()
 
     # -- registration ----------------------------------------------------
 
@@ -304,7 +307,8 @@ class ToolExecutionService:
         )
 
         try:
-            result = self._call_logic(registration, args)
+            with use_gate(self._execution_gate):
+                result = self._call_logic(registration, args)
         except _ToolErrorResponse as raised:
             # Tools can raise this to short-circuit into a typed envelope
             # (e.g. invalid_args, workspace_not_registered). The raise
@@ -365,11 +369,13 @@ class ToolExecutionService:
 
         duration_ms = int((time.monotonic() - started) * 1000)
         evidence_handle: str | None = None
+        output_handle: str | None = None
         if isinstance(result, ToolResponse):
             # The tool body returned a fully-built envelope. Pull out
             # any evidence_handle it set (output.tail uses this) so
             # we don't clobber it when we rebuild meta below.
             evidence_handle = result.meta.evidence_handle or None
+            output_handle = result.meta.output_handle or None
             meta = _meta(
                 registration, call_id, run_id, duration_ms,
                 workspace_id=workspace_id,
@@ -379,6 +385,8 @@ class ToolExecutionService:
             # Preserve any next_actions the tool pre-populated.
             if result.meta.next_actions:
                 meta.next_actions = list(result.meta.next_actions)
+            if output_handle is not None:
+                meta.output_handle = output_handle
             result.meta = meta
             envelope_dict = result.model_dump()
         else:
@@ -393,13 +401,13 @@ class ToolExecutionService:
 
         # Persist oversize bodies as artifacts before the audit row is
         # finished so ``log_path`` and ``meta.output_handle`` agree.
-        handle = _maybe_persist_artifact(envelope_dict, call_id, self._audit_path)
+        handle = _maybe_persist_artifact(envelope_dict, call_id, self._audit_path) or output_handle
 
         audit.record_finish(
             call_id,
-            ok=True,
-            error_code=None,
-            error_message=None,
+            ok=envelope_dict["ok"],
+            error_code=(envelope_dict["error"] or {}).get("code"),
+            error_message=(envelope_dict["error"] or {}).get("message"),
             duration_ms=duration_ms,
             log_path=handle,
             path=self._audit_path,

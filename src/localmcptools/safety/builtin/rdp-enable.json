@@ -1,0 +1,1 @@
+{"id":"block-rdp-enable","severity":"medium","suggestion":"Enabling Remote Desktop is blocked.","match":{"type":"any_of","rules":[{"regex":"fDenyTSConnections.*\\b0\\b"},{"regex":"TermService.*start"}]}}

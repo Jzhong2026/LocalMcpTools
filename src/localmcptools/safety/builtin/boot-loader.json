@@ -1,0 +1,1 @@
+{"id":"block-boot-loader","severity":"critical","suggestion":"Boot-loader changes are blocked.","match":{"type":"any_of","rules":[{"cmd_name":"bcdedit"},{"cmd_name":"bootrec"},{"cmd_name":"bcdboot"}]}}

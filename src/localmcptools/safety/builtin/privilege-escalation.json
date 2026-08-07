@@ -1,0 +1,1 @@
+{"id":"block-privilege-escalation","severity":"high","suggestion":"Privilege escalation is blocked.","match":{"type":"any_of","rules":[{"regex":"net\\s+localgroup\\s+administrators.*\\/add"}]}}

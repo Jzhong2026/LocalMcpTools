@@ -31,6 +31,8 @@ DEFAULTS: dict[str, Any] = {
         # side-effect must require an explicit profile escalation plus
         # an approval. See openspec/changes/policy-and-safety/.
         "default_profile": "observe",
+        # Workspace-id -> allowed environment variable names. Empty by default.
+        "env_allowlists": {},
     },
     "audit": {
         # Spike retention: 7 days. Real production retention is decided

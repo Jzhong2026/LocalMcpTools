@@ -1,0 +1,1 @@
+{"id":"block-remote-download-exec","severity":"high","suggestion":"Remote download-and-execute is blocked.","match":{"type":"any_of","rules":[{"regex":"(IEX|Invoke-Expression).*DownloadString"}]}}

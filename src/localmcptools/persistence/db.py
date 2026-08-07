@@ -107,7 +107,36 @@ CREATE TABLE IF NOT EXISTS schema_version (
 );
 """
 
-CURRENT_SCHEMA_VERSION = 2
+# Schema v3 - policy-and-safety: one-shot approvals and deny-rule telemetry.
+APPROVALS_SCHEMA_V3 = """
+CREATE TABLE IF NOT EXISTS approvals (
+    id                  TEXT PRIMARY KEY,
+    workspace_id        TEXT NOT NULL,
+    requested_capability TEXT NOT NULL,
+    action_digest       TEXT NOT NULL,
+    status              TEXT NOT NULL,
+    requested_at        INTEGER NOT NULL,
+    expires_at          INTEGER NOT NULL,
+    approved_at         INTEGER,
+    consumed_at         INTEGER
+);
+"""
+
+APPROVALS_INDEX_V3 = (
+    "CREATE INDEX IF NOT EXISTS idx_approvals_workspace ON approvals(workspace_id);",
+    "CREATE INDEX IF NOT EXISTS idx_approvals_status_expiry ON approvals(status, expires_at);",
+)
+
+RULE_HIT_STATS_SCHEMA_V3 = """
+CREATE TABLE IF NOT EXISTS rule_hit_stats (
+    rule_id             TEXT PRIMARY KEY,
+    hit_count           INTEGER NOT NULL,
+    last_hit_at         INTEGER NOT NULL,
+    last_hit_cmd        TEXT NOT NULL
+);
+"""
+
+CURRENT_SCHEMA_VERSION = 3
 
 
 # --- Connection factory ---------------------------------------------------
@@ -192,6 +221,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute(ddl)
         _write_schema_version(conn, 2)
         current = 2
+
+    if current < 3:
+        _log.info("applying schema migration -> v3 (approvals + rule hit stats)")
+        conn.execute(APPROVALS_SCHEMA_V3)
+        for ddl in APPROVALS_INDEX_V3:
+            conn.execute(ddl)
+        conn.execute(RULE_HIT_STATS_SCHEMA_V3)
+        _write_schema_version(conn, 3)
+        current = 3
 
     if current != CURRENT_SCHEMA_VERSION:
         raise RuntimeError(

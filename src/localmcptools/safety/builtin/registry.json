@@ -1,0 +1,1 @@
+{"id":"block-registry-delete","severity":"high","suggestion":"Registry deletion is blocked.","match":{"type":"any_of","rules":[{"regex":"Remove-Item\\s+HKLM:"},{"regex":"reg\\s+delete\\s+HKLM"}]}}

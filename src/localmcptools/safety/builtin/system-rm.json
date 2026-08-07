@@ -1,0 +1,1 @@
+{"id":"block-system-rm","severity":"critical","suggestion":"System-directory deletion is blocked.","match":{"type":"any_of","rules":[{"regex":"(Remove-Item|rmdir|rm)\\b.*(C:\\\\Windows|C:\\\\Program Files|/Windows)"}]}}

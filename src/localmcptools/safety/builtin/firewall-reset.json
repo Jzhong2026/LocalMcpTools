@@ -1,0 +1,1 @@
+{"id":"block-firewall-reset","severity":"high","suggestion":"Firewall resets are blocked.","match":{"type":"any_of","rules":[{"regex":"netsh\\s+advfirewall\\s+reset"}]}}

@@ -36,7 +36,7 @@ from .execution.service import (
     ToolExecutionService,
 )
 from .persistence.db import init_db
-from .tools import environment, fs, output, workspace
+from .tools import environment, fs, output, shell, workspace
 
 _log = logging.getLogger(__name__)
 
@@ -198,6 +198,33 @@ def _register_tools(service: ToolExecutionService) -> None:
             "Regex search inside an artifact identified by `handle`."
         ),
         param_names=("handle", "pattern", "max_results"),
+    )
+
+    wrappers["workspace.git_status"] = service.register(
+        "workspace.git_status", workspace.workspace_git_status,
+        title="Get Git status", description="Read-only Git status for a registered workspace.",
+        param_names=("workspace_id",),
+    )
+    for name, logic, title in (
+        ("workspace.run_test", workspace.workspace_run_test, "Run workspace tests"),
+        ("workspace.build", workspace.workspace_build, "Build workspace"),
+        ("workspace.lint", workspace.workspace_lint, "Lint workspace"),
+    ):
+        wrappers[name] = service.register(
+            name, logic, title=title,
+            description="Run the resolved semantic preset after human approval.",
+            param_names=("workspace_id", "filter", "timeout_ms", "approval_id"),
+        )
+
+    wrappers["shell.run_command"] = service.register(
+        "shell.run_command",
+        shell.shell_run_command,
+        title="Run controlled PowerShell command",
+        description=(
+            "Run a PowerShell command in a workspace after capability and "
+            "one-time human approval checks. The caller's cwd is ignored."
+        ),
+        param_names=("workspace_id", "cmd", "timeout_ms", "env", "approval_id", "cwd"),
     )
 
     # Attach the wrappers to the service so _build_fast_mcp can pull

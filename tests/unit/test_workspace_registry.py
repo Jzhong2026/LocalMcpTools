@@ -262,12 +262,11 @@ def test_path_escape_rejected_early(
 # --- DB integration: schema_version bumps to 2 -------------------------
 
 
-def test_db_schema_bumps_to_two_via_registry(fresh_db: Path, ws_dir: Path) -> None:
-    """Once a workspace is registered, the schema is at v2."""
-    # fresh_db fixture already ran init_db; verify v2 is current.
+def test_db_schema_is_current_via_registry(fresh_db: Path, ws_dir: Path) -> None:
+    """Once a workspace is registered, all current migrations have run."""
     with db.connection(fresh_db) as conn:
         row = conn.execute("SELECT MAX(version) AS v FROM schema_version").fetchone()
-        assert row["v"] == 2
+        assert row["v"] == db.CURRENT_SCHEMA_VERSION
         ws = register(ws_dir, conn=conn)
         # Workspaces table is present and has our row.
         rows = conn.execute(
