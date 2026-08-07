@@ -83,6 +83,7 @@ LocalMcpTools/
 │       │   ├── process.py             # process.list_processes / list_listening_ports / find_by_port / kill
 │       │   ├── fs.py                  # fs.read_range / tail_log_file / grep_files
 │       │   ├── ui.py                  # ui.screenshot_* / get_ui_tree / find_element / click_element / type_text
+│       │   ├── ocr.py                 # ocr_region / find_text / assert_text（结构化文字证据）
 │       │   ├── vscode.py              # vscode.get_problems / get_installed_extensions / get_logs / get_debug_sessions
 │       │   └── runtime.py             # runtime.detect_runtime / get_env / list_path
 │       ├── execution/
@@ -181,7 +182,8 @@ app.include_router(control_router, prefix="/api")
 | `shell` | `shell.run_command`（仅 `workspace_exec` profile；不作为默认工作流） |
 | `process` | `process.start_dev_server`, `process.get_status`, `process.stop_managed`, `process.list_managed`, `process.list_listening_ports` |
 | `fs` | `fs.read_range`, `fs.tail_log_file`, `fs.grep_files`（均限已注册 workspace/artifact） |
-| `ui` | `ui.get_ui_tree`, `ui.find_element`, `ui.click_element`, `ui.type_text`（默认关闭，限已授权窗口） |
+| `ui` | `ui.get_ui_tree`, `ui.find_element`, `ui.click_element`, `ui.type_text`, `ui.act_and_verify`（默认关闭，限已授权窗口） |
+| `ocr` | `ocr.ocr_region`, `ocr.find_text`, `ocr.assert_text`（限已授权窗口/截图 artifact） |
 | `vscode` | `vscode.get_problems`, `vscode.get_installed_extensions`, `vscode.get_logs`, `vscode.get_debug_sessions` |
 | `runtime` | `runtime.detect_runtime`, `runtime.get_env`, `runtime.list_path` |
 
@@ -198,7 +200,42 @@ app.include_router(control_router, prefix="/api")
 
 请求中的 `cwd`、`agent`、`allow_dangerous` 只用于审计/提示。授权由服务端以 `client_instance + profile + workspace + policy_version + approval` 判定。
 
-### 2.3 统一返回 envelope
+### 2.3 OCR 作为 UI 验证辅助
+
+OCR 的职责是为**渲染出的文字**提供可定位、可量化的第二证据源；它不能替代 Web DOM、Accessibility Tree 或 Windows UI Automation，也不能单独证明按钮可点击、选中状态、图标、颜色或布局正确。
+
+**工具契约**:
+
+```text
+ocr.ocr_region(source, region?, languages=["zh-Hans", "en"])
+  source: 已授权 window_id 或受保护 screenshot/artifact handle
+  returns: blocks[{text, confidence, bounding_box: {x, y, width, height}, line_index}],
+           full_text, source_handle, preprocessing, uncertain
+
+ocr.find_text(query, source, region?, fuzzy=false)
+  returns: matches[{text, confidence, bounding_box: {x, y, width, height}}],
+           matched, uncertain
+
+ocr.assert_text(expected, source, region?, match="exact|contains|regex")
+  returns: passed, actual_text, matches, min_confidence,
+           evidence_handle, uncertain
+```
+
+**规则**:
+
+- 仅接受已授权窗口或 artifact handle，不接受任意文件路径/整屏读取；OCR 可见内容按敏感数据处理，落盘前脱敏。
+- 返回每个文字块的坐标和置信度；低于配置阈值、没有匹配或预处理失败时返回 `uncertain=true`，不得返回“验证通过”。
+- 对 Web UI，先取 DOM/Accessibility Tree 的文本，再以 OCR 交叉验证实际渲染；对原生窗口，先取 UI Automation，再以 OCR 补足未暴露的文本。
+- 截图前固定窗口大小、DPI、缩放、主题，并等待目标窗口稳定；优先截元素/区域，避免全屏截图。
+- `ui.act_and_verify` 是推荐组合：操作后必须执行 DOM/UIA/OCR 至少一种断言；单独 `click success` 不能代表业务或展示正确。
+
+**Provider 策略**:
+
+- 定义可替换的 `OcrProvider` 接口；阶段 5 spike 验证 Windows 可用 OCR provider 对中英混排、坐标与置信度的支持。
+- 若系统 provider 不满足要求，再引入随应用分发模型的 provider；模型体积、首次安装、离线运行和许可证必须在选型记录中明确。
+- OCR provider 的版本、语言包和预处理参数写入 audit meta，保证误识别可复现。
+
+### 2.4 统一返回 envelope
 
 ```python
 # src/localmcptools/tools/_common.py
@@ -744,9 +781,9 @@ ui/
 - [ ] MCP Config 页一键复制
 - [ ] 自动开浏览器(`ui.auto_open_browser=true`)
 
-### 阶段 5 — UI 自动化（可选 profile，预估 1.5 天）
+### 阶段 5 — UI 自动化 + OCR 辅助验证（可选 profile，预估 2 天）
 
-**目标**: 在用户明确授权的窗口内，不靠截图拿到结构化 UI 树。
+**目标**: 在用户明确授权的窗口内，以 UIA/DOM 为主、OCR 为辅，取得可验证的 UI 证据而不是让 agent 仅凭截图猜测。
 
 **DoD**:
 - [ ] `interactive_ui` 默认关闭；用户选择目标窗口/进程后才允许调用
@@ -754,7 +791,13 @@ ui/
 - [ ] `ui.find_element` 按 text / automationId / controlType 查找
 - [ ] `ui.click_element` / `ui.type_text` 可用
 - [ ] `ui.screenshot_full_screen` / `screenshot_window` / `screenshot_region` 备用
+- [ ] `ocr.ocr_region` 返回中英文字块、坐标、置信度和 `uncertain` 状态
+- [ ] `ocr.find_text` / `ocr.assert_text` 支持精确、包含和正则匹配；低置信度不能判通过
+- [ ] Web UI 验证优先 DOM/Accessibility Tree，原生 UI 验证优先 UI Automation；OCR 只作渲染文字的交叉证据
+- [ ] `ui.act_and_verify` 在点击/输入后强制取得 UIA、DOM 或 OCR 断言；不能只依据 `click success`
+- [ ] OCR 仅处理已授权窗口或 screenshot/artifact handle，OCR 文本按敏感数据脱敏和审计
 - [ ] VS Code 窗口 demo: 打开 Settings → 找到 "Auto Save" → 改成 "afterDelay"
+- [ ] demo 同时证明：目标文字的 OCR 坐标/置信度与 UIA/DOM 结构化属性一致
 - [ ] 单元测试 + 集成测试
 
 ### 阶段 6 — 面向弱 agent 的增强能力(预估 2 天)
@@ -802,6 +845,7 @@ pydantic==2.9.0
 psutil==6.0.0
 chardet==5.2.0
 uiautomation==2.0.18
+# OCR provider 暂不锁定：阶段 5 spike 验证 Windows provider 的中英、坐标、置信度与离线能力后确定
 python-dotenv==1.0.0
 
 # requirements-dev.txt
