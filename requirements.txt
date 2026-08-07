@@ -1,0 +1,9 @@
+# Runtime dependencies. Versions NOT locked yet — that happens in
+# change-1's compatibility spike (openspec/changes/bootstrap-mcp-server/).
+# Once both codebuddy and Copilot work via stdio, this file gets pinned.
+#
+# Upper bounds are conservative; loosen as the SDK confirms stability.
+
+mcp>=1.0,<2
+pydantic>=2.9,<3
+psutil>=6.0,<7

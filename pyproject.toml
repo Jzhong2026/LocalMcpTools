@@ -1,0 +1,96 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "localmcptools"
+version = "0.1.0"
+description = "Local MCP toolset for VS Code agents (codebuddy, GitHub Copilot, workbuddy, minimax code)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "LocalMcpTools Contributors" },
+]
+keywords = ["mcp", "model-context-protocol", "agent", "vscode", "codebuddy", "copilot"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows :: Windows 10",
+    "Operating System :: Microsoft :: Windows :: Windows 11",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+# Runtime dependencies are NOT pinned here yet — the spike (change-1)
+# locks them. See requirements.txt for current state.
+dependencies = [
+    "mcp>=1.0,<2",   # locked in change-1 once stdio round-trip succeeds
+    "pydantic>=2.9,<3",
+    "psutil>=6.0,<7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3,<9",
+    "pytest-asyncio>=0.24,<1",
+    "ruff>=0.6,<1",
+    "mypy>=1.11,<2",
+]
+
+[project.scripts]
+localmcptools = "localmcptools.cli:main"
+
+[project.urls]
+Repository = "https://github.com/Jzhong2026/LocalMcpTools"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["localmcptools*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line length (formatter handles)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_ignores = true
+warn_return_any = true
+disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = ["mcp.*"]
+ignore_missing_imports = true

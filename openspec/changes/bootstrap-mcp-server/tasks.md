@@ -5,13 +5,13 @@
 
 ## 0.1 Repo & dependencies
 
-- [ ] Create `pyproject.toml` (PEP 621) with `localmcptools` package, Python 3.11+
-- [ ] Create `requirements.txt` (no lock yet) with: `mcp`, `pydantic`, `psutil`
-- [ ] Create `requirements-dev.txt` with: `pytest`, `pytest-asyncio`, `ruff`, `mypy`
-- [ ] Create `.gitignore` (Python + Node + Angular + IDE + `%APPDATA%`-shaped paths)
-- [ ] Create `.editorconfig`
-- [ ] Create `python -m venv .venv` (development venv; not committed)
-- [ ] `pip install -e .` from source
+- [x] Create `pyproject.toml` (PEP 621) with `localmcptools` package, Python 3.11+
+- [x] Create `requirements.txt` (no lock yet) with: `mcp`, `pydantic`, `psutil`
+- [x] Create `requirements-dev.txt` with: `pytest`, `pytest-asyncio`, `ruff`, `mypy`
+- [x] Create `.gitignore` (Python + Node + Angular + IDE + `%APPDATA%`-shaped paths)
+- [x] Create `.editorconfig`
+- [x] Create `python -m venv .venv` (development venv; not committed)
+- [x] `pip install -e .` from source (43 packages installed)
 
 ## 0.2 Path & config plumbing
 

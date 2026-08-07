@@ -1,0 +1,74 @@
+# --- Python ----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+.installed.cfg
+*.egg-info
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.cache
+pip-wheel-metadata/
+pip-log.txt
+
+# --- Virtual envs (LocalMcpTools specific path) -----------------------------
+.venv/
+venv/
+env/
+
+# --- MCP / server runtime data ---------------------------------------------
+# LocalMcpTools data dir (default %APPDATA%\LocalMcpTools\); keep configurable
+# via LMCP_DATA_DIR for testing. NEVER commit audit DB, artifacts, logs.
+lmcp-data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# --- Angular / Node ---------------------------------------------------------
+node_modules/
+ui/dist/
+ui/.angular/
+ui/.vscode/
+ui/coverage/
+
+# LocalMcpTools: Angular build output. The build_frontend.bat copies the
+# final bundle into the package, but the intermediate dist stays out of git.
+src/localmcptools/ui_assets/
+!src/localmcptools/ui_assets/.gitkeep
+
+# --- IDEs -------------------------------------------------------------------
+.idea/
+.vscode/
+!.vscode/extensions.json       # shared team settings ok
+!.vscode/settings.recommended.json
+*.swp
+*.swo
+*~
+
+# --- OS ---------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# --- PowerShell transcripts (debugging, never commit) -----------------------
+*.transcript.txt
+psreadline/
+
+# --- Local scratch ----------------------------------------------------------
+*.log
+!server.log
+scratch/
+tmp/
