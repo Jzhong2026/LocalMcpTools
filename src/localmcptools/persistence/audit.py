@@ -132,6 +132,7 @@ def record_finish(
     log_path: str | None = None,
     blocked_by: str | None = None,
     severity: str | None = None,
+    approval_id: str | None = None,
     conn: sqlite3.Connection | None = None,
     path: "Path | None" = None,
 ) -> None:
@@ -140,6 +141,11 @@ def record_finish(
     ``status`` is derived: ``success`` if ``ok``, otherwise mapped from
     ``error_code`` (``invalid_args`` stays as ``invalid_args``; everything
     else becomes ``failed``).
+
+    ``log_path`` may be either an absolute filesystem path or an
+    artifact handle (e.g. ``art://2026-08-07/calls/<id>.log``).
+    Persistence layer treats both as opaque strings; the UI is
+    responsible for rendering the handle into a clickable link.
     """
     status = _status_from(ok, error_code)
     finished_at = _now_ms()
@@ -155,6 +161,7 @@ def record_finish(
         "stderr_bytes": stderr_bytes,
         "duration_ms": max(0, int(duration_ms)),
         "log_path": log_path,
+        "approval_id": approval_id,
         "status": status,
         "finished_at": finished_at,
     }

@@ -192,3 +192,146 @@ def test_indexes_exist(fresh_db: Path) -> None:
         names = {r["name"] for r in rows}
     assert "idx_calls_timestamp" in names
     assert "idx_calls_tool" in names
+
+
+# --- change-2 / 1.4: audit extensions --------------------------------------
+
+
+def test_record_start_with_client_instance_and_workspace(fresh_db: Path) -> None:
+    db.init_db(fresh_db)
+    call_id = str(uuid.uuid4())
+    audit.record_start(
+        call_id=call_id,
+        tool="workspace.inspect",
+        args_redacted="{}",
+        run_id="r-1",
+        profile="observe",
+        policy_version="v2",
+        client_instance="codebuddy-xyz",
+        workspace_id="ws-abc",
+        conn=None,
+        path=fresh_db,
+    )
+    with db.connection(fresh_db) as conn:
+        row = conn.execute(
+            "SELECT client_instance, workspace_id, approval_id FROM calls WHERE id = ?",
+            (call_id,),
+        ).fetchone()
+    assert row["client_instance"] == "codebuddy-xyz"
+    assert row["workspace_id"] == "ws-abc"
+    assert row["approval_id"] is None
+
+
+def test_record_finish_sets_approval_id(fresh_db: Path) -> None:
+    db.init_db(fresh_db)
+    call_id = str(uuid.uuid4())
+    audit.record_start(
+        call_id=call_id,
+        tool="workspace.inspect",
+        args_redacted="{}",
+        run_id="r-2",
+        profile="observe",
+        policy_version="v2",
+        path=fresh_db,
+    )
+    audit.record_finish(
+        call_id,
+        ok=True,
+        error_code=None,
+        error_message=None,
+        duration_ms=10,
+        approval_id="appr-xyz-001",
+        path=fresh_db,
+    )
+    with db.connection(fresh_db) as conn:
+        row = conn.execute(
+            "SELECT approval_id FROM calls WHERE id = ?", (call_id,)
+        ).fetchone()
+    assert row["approval_id"] == "appr-xyz-001"
+
+
+def test_record_finish_log_path_accepts_artifact_handle(fresh_db: Path) -> None:
+    """``log_path`` may be an absolute path *or* an artifact handle."""
+    db.init_db(fresh_db)
+    call_id = str(uuid.uuid4())
+    audit.record_start(
+        call_id=call_id,
+        tool="workspace.inspect",
+        args_redacted="{}",
+        run_id="r-3",
+        profile="observe",
+        policy_version="v2",
+        path=fresh_db,
+    )
+    handle = "art://2026-08-07/calls/abc123.log"
+    audit.record_finish(
+        call_id,
+        ok=True,
+        error_code=None,
+        error_message=None,
+        duration_ms=10,
+        log_path=handle,
+        path=fresh_db,
+    )
+    with db.connection(fresh_db) as conn:
+        row = conn.execute(
+            "SELECT log_path FROM calls WHERE id = ?", (call_id,)
+        ).fetchone()
+    assert row["log_path"] == handle
+
+
+def test_full_field_round_trip(fresh_db: Path) -> None:
+    """One end-to-end call that exercises every column populated by change-2."""
+    db.init_db(fresh_db)
+    call_id = str(uuid.uuid4())
+    audit.record_start(
+        call_id=call_id,
+        tool="shell.run_command",  # future tool, just for the test
+        args_redacted='{"command": "echo hi"}',
+        run_id=str(uuid.uuid4()),
+        profile="execute",
+        policy_version="v2",
+        agent="codebuddy",
+        client_instance="codebuddy-xyz",
+        workspace_id="ws-abc",
+        pid=12345,
+        path=fresh_db,
+    )
+    audit.record_finish(
+        call_id,
+        ok=True,
+        error_code=None,
+        error_message=None,
+        duration_ms=42,
+        exit_code=0,
+        stdout_bytes=8,
+        stderr_bytes=0,
+        log_path="art://2026-08-07/calls/" + call_id + ".log",
+        approval_id="appr-test-1",
+        path=fresh_db,
+    )
+    with db.connection(fresh_db) as conn:
+        row = conn.execute("SELECT * FROM calls WHERE id = ?", (call_id,)).fetchone()
+
+    # Every column populated.
+    expected = {
+        "tool": "shell.run_command",
+        "agent": "codebuddy",
+        "client_instance": "codebuddy-xyz",
+        "workspace_id": "ws-abc",
+        "profile": "execute",
+        "policy_version": "v2",
+        "approval_id": "appr-test-1",
+        "ok": 1,
+        "exit_code": 0,
+        "stdout_bytes": 8,
+        "stderr_bytes": 0,
+        "duration_ms": 42,
+        "status": "success",
+        "pid": 12345,
+        "log_path": "art://2026-08-07/calls/" + call_id + ".log",
+    }
+    for col, value in expected.items():
+        assert row[col] == value, f"{col}: {row[col]!r} != {value!r}"
+    # Timing invariant.
+    assert row["finished_at"] >= row["timestamp"]
