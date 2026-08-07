@@ -19,8 +19,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import artifacts
-from . import db
+from . import artifacts, db
 from .db import get_connection
 
 _log = logging.getLogger(__name__)
@@ -50,7 +49,7 @@ def record_start(
     workspace_id: str | None = None,
     pid: int | None = None,
     conn: sqlite3.Connection | None = None,
-    path: "Path | None" = None,
+    path: Path | None = None,
 ) -> None:
     """Insert a ``running`` row.
 
@@ -135,7 +134,7 @@ def record_finish(
     severity: str | None = None,
     approval_id: str | None = None,
     conn: sqlite3.Connection | None = None,
-    path: "Path | None" = None,
+    path: Path | None = None,
 ) -> None:
     """Update the row created by :func:`record_start`.
 

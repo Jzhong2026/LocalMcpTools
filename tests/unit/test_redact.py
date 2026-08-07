@@ -10,15 +10,13 @@ Covers the spike DoD bullets:
 
 from __future__ import annotations
 
-import pytest
-
-from localmcptools.safety import redact
 from localmcptools.safety.redact import (
     PATTERNS,
     SECRET_ENV_NAMES,
+)
+from localmcptools.safety.redact import (
     redact as redact_fn,
 )
-
 
 # --- Single-pattern cases -------------------------------------------------
 

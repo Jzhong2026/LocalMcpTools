@@ -10,13 +10,11 @@ Covers the spike DoD bullets:
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 
 import pytest
 
 from localmcptools.persistence import db
-from localmcptools.workspaces import registry
 from localmcptools.workspaces.registry import (
     InvalidPath,
     Workspace,

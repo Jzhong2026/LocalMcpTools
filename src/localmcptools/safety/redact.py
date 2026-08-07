@@ -26,8 +26,7 @@ makes the audit log useless. The unit tests in
 from __future__ import annotations
 
 import re
-from typing import Callable
-
+from collections.abc import Callable
 
 # --- Pattern catalogue ---------------------------------------------------
 

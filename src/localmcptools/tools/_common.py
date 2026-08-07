@@ -24,7 +24,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 # --- Standard error code registry -----------------------------------------
 #
 # Frozen for the spike. Every tool's failure path must pick a code from
@@ -109,7 +108,7 @@ class ToolResponse(BaseModel):
         *,
         data: Any,
         meta: ToolMeta,
-    ) -> "ToolResponse":
+    ) -> ToolResponse:
         """Build a successful response."""
         return cls(ok=True, data=data, meta=meta, error=None)
 
@@ -124,7 +123,7 @@ class ToolResponse(BaseModel):
         blocked_by: str | None = None,
         severity: str | None = None,
         approval_id: str | None = None,
-    ) -> "ToolResponse":
+    ) -> ToolResponse:
         """Build a failure response. ``code`` must be from STANDARD_ERROR_CODES."""
         if code not in STANDARD_ERROR_CODES:
             # Catch obvious misuse early; this is a programmer error.

@@ -51,7 +51,7 @@ def _register_tools(mcp: FastMCP) -> None:
             "an optional 'placeholder' field and ignores it."
         ),
     )
-    def workspace_inspect(placeholder: bool = True) -> dict:
+    def workspace_inspect(placeholder: bool = True) -> dict[str, object]:
         """Spike stub. See module docstring for details."""
         args = {"placeholder": placeholder}
         return workspace.invoke("workspace.inspect", args, workspace.inspect_tool)

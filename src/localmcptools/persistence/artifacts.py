@@ -35,11 +35,9 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 from ..config.paths import data_dir
 from ..safety.redact import redact
-from ..tools._common import ERR_ARTIFACT_NOT_FOUND, ERR_REDACTION_FAILED
 from .db import get_connection
 
 _log = logging.getLogger(__name__)
@@ -97,7 +95,7 @@ def _today_str() -> str:
     We use UTC so a multi-process run on a machine whose local clock
     changes (DST, timezone move) doesn't fragment the artifact tree.
     """
-    return _dt.datetime.now(tz=_dt.timezone.utc).strftime("%Y-%m-%d")
+    return _dt.datetime.now(tz=_dt.UTC).strftime("%Y-%m-%d")
 
 
 def artifacts_root() -> Path:
@@ -437,11 +435,11 @@ def read_range(
 
 def _read_range_streaming(rec: ArtifactRecord, start_line: int, end_line: int) -> list[str]:
     out: list[str] = []
-    target_count = end_line - start_line
+    end_line - start_line
     p = Path(rec.path)
     if not p.exists():
         raise ArtifactNotFound(f"artifact file vanished: {rec.path!r}")
-    with open(p, "r", encoding="utf-8", errors="replace") as fh:
+    with open(p, encoding="utf-8", errors="replace") as fh:
         for i, line in enumerate(fh):
             if i >= end_line:
                 break
@@ -474,7 +472,7 @@ def search(
     p = Path(rec.path)
     if not p.exists():
         raise ArtifactNotFound(f"artifact file vanished: {rec.path!r}")
-    with open(p, "r", encoding="utf-8", errors="replace") as fh:
+    with open(p, encoding="utf-8", errors="replace") as fh:
         for i, line in enumerate(fh):
             if rx.search(line):
                 out.append({"line_no": i, "text": line.rstrip("\n")})

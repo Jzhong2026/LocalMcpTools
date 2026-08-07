@@ -13,17 +13,14 @@ Covers the spike DoD bullets:
 from __future__ import annotations
 
 import os
-import sqlite3
 from pathlib import Path
 
 import pytest
 
-from localmcptools.persistence import artifacts
 from localmcptools.persistence.artifacts import (
+    INLINE_THRESHOLD_BYTES,
     ArtifactNotFound,
     ArtifactRecord,
-    INLINE_THRESHOLD_BYTES,
-    RedactionFailed,
     build_handle,
     exists,
     lookup,
@@ -34,7 +31,6 @@ from localmcptools.persistence.artifacts import (
     tail,
     write,
 )
-
 
 # --- Helpers / fixtures ---------------------------------------------------
 
