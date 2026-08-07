@@ -67,13 +67,47 @@ CALLS_INDEXES_V1 = (
     "CREATE INDEX IF NOT EXISTS idx_calls_tool ON calls(tool);",
 )
 
+# Schema v2 — change-2 (core-shell-and-audit) adds the workspace
+# registry and the artifact directory. The DDL is split per version
+# so older databases migrate cleanly.
+WORKSPACES_SCHEMA_V2 = """
+CREATE TABLE IF NOT EXISTS workspaces (
+    id              TEXT PRIMARY KEY,
+    canonical_root  TEXT NOT NULL,
+    registered_at   INTEGER NOT NULL,
+    profile         TEXT NOT NULL DEFAULT 'observe',
+    notes           TEXT
+);
+"""
+
+WORKSPACES_INDEX_V2 = (
+    "CREATE INDEX IF NOT EXISTS idx_workspaces_canonical ON workspaces(canonical_root);",
+)
+
+ARTIFACTS_SCHEMA_V2 = """
+CREATE TABLE IF NOT EXISTS artifacts (
+    handle          TEXT PRIMARY KEY,
+    path            TEXT NOT NULL,
+    call_id         TEXT NOT NULL,
+    bytes_total     INTEGER NOT NULL,
+    line_count      INTEGER NOT NULL,
+    created_at      INTEGER NOT NULL,
+    expires_at      INTEGER,
+    sensitive       INTEGER NOT NULL DEFAULT 0
+);
+"""
+
+ARTIFACTS_INDEX_V2 = (
+    "CREATE INDEX IF NOT EXISTS idx_artifacts_call ON artifacts(call_id);",
+)
+
 SCHEMA_VERSION_TABLE = """
 CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER PRIMARY KEY
 );
 """
 
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 
 
 # --- Connection factory ---------------------------------------------------
@@ -148,7 +182,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
         _write_schema_version(conn, 1)
         current = 1
 
-    # Future: if current < 2: ... ; _write_schema_version(conn, 2)
+    if current < 2:
+        _log.info("applying schema migration -> v2 (workspaces + artifacts)")
+        conn.execute(WORKSPACES_SCHEMA_V2)
+        for ddl in WORKSPACES_INDEX_V2:
+            conn.execute(ddl)
+        conn.execute(ARTIFACTS_SCHEMA_V2)
+        for ddl in ARTIFACTS_INDEX_V2:
+            conn.execute(ddl)
+        _write_schema_version(conn, 2)
+        current = 2
 
     if current != CURRENT_SCHEMA_VERSION:
         raise RuntimeError(
@@ -158,8 +201,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
 
 def _read_schema_version(conn: sqlite3.Connection) -> int:
-    row = conn.execute("SELECT version FROM schema_version LIMIT 1").fetchone()
-    return int(row["version"]) if row else 0
+    """Return the *highest* recorded schema version, or 0 if none.
+
+    We use ``MAX`` rather than ``LIMIT 1`` because migrations can
+    insert a new row with the new version while leaving the old one
+    in place if the upsert is ever bypassed (older builds used
+    ``INSERT`` directly). The highest value is always the right one
+    to drive the next ``if current < N:`` check.
+    """
+    row = conn.execute("SELECT MAX(version) AS v FROM schema_version").fetchone()
+    return int(row["v"]) if row and row["v"] is not None else 0
 
 
 def _write_schema_version(conn: sqlite3.Connection, version: int) -> None:

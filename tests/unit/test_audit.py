@@ -46,8 +46,8 @@ def test_get_connection_uses_wal(fresh_db: Path) -> None:
 def test_schema_version_recorded(fresh_db: Path) -> None:
     db.init_db(fresh_db)
     with db.connection(fresh_db) as conn:
-        row = conn.execute("SELECT version FROM schema_version LIMIT 1").fetchone()
-        assert row["version"] == db.CURRENT_SCHEMA_VERSION
+        row = conn.execute("SELECT MAX(version) AS v FROM schema_version").fetchone()
+        assert row["v"] == db.CURRENT_SCHEMA_VERSION
 
 
 def test_record_start_inserts_running_row(fresh_db: Path) -> None:

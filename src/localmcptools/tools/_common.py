@@ -35,11 +35,24 @@ ERR_INVALID_ARGS = "invalid_args"
 ERR_NOT_IMPLEMENTED = "not_implemented"
 ERR_APPROVAL_REQUIRED = "approval_required"
 
+# Added by change-2 (core-shell-and-audit). See
+# openspec/changes/core-shell-and-audit/specs/environment-and-workspace.md.
+ERR_INVALID_PATH = "invalid_path"
+ERR_WORKSPACE_NOT_REGISTERED = "workspace_not_registered"
+ERR_ARTIFACT_NOT_FOUND = "artifact_not_found"
+ERR_REDACTION_FAILED = "redaction_failed"
+ERR_BINARY_FILE = "binary_file"
+
 STANDARD_ERROR_CODES: tuple[str, ...] = (
     ERR_INTERNAL_ERROR,
     ERR_INVALID_ARGS,
     ERR_NOT_IMPLEMENTED,
     ERR_APPROVAL_REQUIRED,
+    ERR_INVALID_PATH,
+    ERR_WORKSPACE_NOT_REGISTERED,
+    ERR_ARTIFACT_NOT_FOUND,
+    ERR_REDACTION_FAILED,
+    ERR_BINARY_FILE,
 )
 
 
