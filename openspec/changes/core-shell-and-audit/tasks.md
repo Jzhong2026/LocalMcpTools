@@ -5,41 +5,83 @@
 
 ## 1.1 Path safety & workspace registry
 
-- [ ] `workspaces/registry.py`: `register(path, profile='observe')` returns `Workspace`
-- [ ] `workspaces/registry.py`: `resolve(workspace_id)` raises `WorkspaceNotRegistered`
-- [ ] `workspaces/registry.py`: `canonicalize(path)` uses `os.path.realpath`
-- [ ] `workspaces/registry.py`: rejects paths that are not directories
-- [ ] `workspaces/registry.py`: rejects `..` traversal before `realpath` (early reject)
-- [ ] Add `workspaces` SQLite table + migration; bump `schema_version` to 2
-- [ ] Unit test: path-escape attempts (`..\..\Windows`, `C:\Windows\..\..\foo`) rejected
-- [ ] Unit test: two different inputs that canonicalize to the same path share one row
+- [x] `workspaces/registry.py`: `register(path, profile='observe')` returns `Workspace`
+- [x] `workspaces/registry.py`: `resolve(workspace_id)` raises `WorkspaceNotRegistered`
+- [x] `workspaces/registry.py`: `canonicalize(path)` uses `os.path.realpath`
+- [x] `workspaces/registry.py`: rejects paths that are not directories
+- [x] `workspaces/registry.py`: rejects `..` traversal before `realpath` (early reject)
+- [x] Add `workspaces` SQLite table + migration; bump `schema_version` to 2
+- [x] Unit test: path-escape attempts (`..\..\Windows`, `C:\Windows\..\..\foo`) rejected
+- [x] Unit test: two different inputs that canonicalize to the same path share one row
+
+> **Done in commit `ad9a9f7`.** Known follow-up: `register()` currently
+> accepts a `profile` argument and can rewrite an existing row's
+> profile on re-registration. The OpenSpec profile contract says
+> profile is a server-side workspace attribute and tools must not be
+> able to escalate. Tracked as a separate refactor (1.7 → 1.10 batch
+> will introduce a `PolicyService` that owns profile updates and
+> `register()` will always write `observe`).
 
 ## 1.2 Redaction
 
-- [ ] `safety/redact.py`: ordered regex list per design.md
-- [ ] `safety/redact.py`: pure function, returns `(redacted_text, redacted_count)`
-- [ ] Unit test: Bearer, api_key=, JWT, .env lines, mixed content
-- [ ] Unit test: `password=secret123` → `password=***`; `name=John` unchanged
+- [x] `safety/redact.py`: ordered regex list per design.md
+- [x] `safety/redact.py`: pure function, returns `(redacted_text, redacted_count)`
+- [x] Unit test: Bearer, api_key=, JWT, .env lines, mixed content
+- [x] Unit test: `password=secret123` → `password=***`; `name=John` unchanged
+
+> **Done in commit `2d41986`.** Includes provider-PAT patterns
+> (glpat-, ghp_, xox*, sk_live_*) beyond the design.md baseline.
 
 ## 1.3 Artifact storage
 
-- [ ] `persistence/artifacts.py`: `write(call_id, content, sensitive=False)` returns handle
-- [ ] `persistence/artifacts.py`: write path is `artifacts/YYYY-MM-DD/calls/<call_id>.log`
-- [ ] `persistence/artifacts.py`: set Windows DACL to current user only (`icacls`)
-- [ ] `persistence/artifacts.py`: ACL failure → raise `RedactionFailed` (caller aborts persist)
-- [ ] `persistence/artifacts.py`: 64KB threshold; smaller content can stay inline
-- [ ] `persistence/artifacts.py`: `lookup(handle)` returns metadata or raises `ArtifactNotFound`
-- [ ] `persistence/artifacts.py`: `read_range(handle, start, end)` / `tail(handle, n)` / `search(handle, pattern)`
-- [ ] Add `artifacts` SQLite table; bump `schema_version` to 2
-- [ ] Unit test: ACL applied (skip on non-Windows CI; mark xfail)
-- [ ] Unit test: handle shape is `art://YYYY-MM-DD/calls/<uuid>.log`
+- [x] `persistence/artifacts.py`: `write(call_id, content, sensitive=False)` returns handle
+- [x] `persistence/artifacts.py`: write path is `artifacts/YYYY-MM-DD/calls/<call_id>.log`
+- [x] `persistence/artifacts.py`: set Windows DACL to current user only (`icacls`)
+- [x] `persistence/artifacts.py`: ACL failure → raise `RedactionFailed` (caller aborts persist)
+- [x] `persistence/artifacts.py`: 64KB threshold; smaller content can stay inline
+- [x] `persistence/artifacts.py`: `lookup(handle)` returns metadata or raises `ArtifactNotFound`
+- [x] `persistence/artifacts.py`: `read_range(handle, start, end)` / `tail(handle, n)` / `search(handle, pattern)`
+- [x] Add `artifacts` SQLite table; bump `schema_version` to 2
+- [x] Unit test: ACL applied (skip on non-Windows CI; mark xfail)
+- [x] Unit test: handle shape is `art://YYYY-MM-DD/calls/<uuid>.log`
+
+> **Done in commit `d46f742`.** Known follow-ups:
+> 1. `write(..., path=...)` accepts an arbitrary target path, which
+>    weakens the "agent cannot specify the artifact path" invariant.
+>    Will be removed in the architecture refactor; the public API
+>    will only accept `call_id`.
+> 2. `_verify_acl()` is a Windows no-op today; will be replaced with a
+>    real ACL re-check (parses `icacls` output) when the artifact
+>    module is split per the architecture review.
+> 3. Module currently mixes path generation, redaction, atomic write,
+>    ACL, SQLite metadata, and read/search/tail. Splitting into
+>    `ArtifactHandle` / `ArtifactStore` / `ArtifactRepository` /
+>    `ArtifactAccessPolicy` / `ArtifactService` is queued behind the
+>    `ToolExecutionService` work.
 
 ## 1.4 Audit extensions
 
-- [ ] `persistence/audit.py`: `record_start` accepts `client_instance`, `workspace_id`
-- [ ] `persistence/audit.py`: `record_finish` accepts `approval_id`
-- [ ] `persistence/audit.py`: writes `log_path` as artifact handle on success
-- [ ] Unit test: round-trip with all new fields
+- [x] `persistence/audit.py`: `record_start` accepts `client_instance`, `workspace_id`
+- [x] `persistence/audit.py`: `record_finish` accepts `approval_id`
+- [x] `persistence/audit.py`: writes `log_path` as artifact handle on success
+- [x] Unit test: round-trip with all new fields
+
+> **Done in commit `b8e1c6a` with follow-up in commit (this one).** The
+> original implementation accepted either an absolute path or an
+> `art://` handle on success, which violates the OpenSpec "handle-only"
+> contract. `record_finish(ok=True, log_path=...)` now raises
+> `ValueError` for any non-handle string (including the empty string).
+> Tests cover: valid handle accepted, absolute path rejected, malformed
+> handle rejected, failure path ignores `log_path`.
+>
+> Known follow-ups:
+> 1. `audit` does not yet call `redact()` on `args_redacted` or
+>    `error_message`; it trusts callers. The
+>    `ToolExecutionService` refactor (queued behind 1.5 → 1.8) will
+>    make this a single chokepoint.
+> 2. Audit does not currently know which profile values are valid;
+>    the round-trip test uses `workspace_exec` (OpenSpec-canonical).
+>    The PolicyService (change-3) will own the canonical list.
 
 ## 1.5 `environment.get`
 

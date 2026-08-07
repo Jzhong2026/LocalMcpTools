@@ -19,6 +19,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from . import artifacts
 from . import db
 from .db import get_connection
 
@@ -142,11 +143,36 @@ def record_finish(
     ``error_code`` (``invalid_args`` stays as ``invalid_args``; everything
     else becomes ``failed``).
 
-    ``log_path`` may be either an absolute filesystem path or an
-    artifact handle (e.g. ``art://2026-08-07/calls/<id>.log``).
-    Persistence layer treats both as opaque strings; the UI is
-    responsible for rendering the handle into a clickable link.
+    Contract on ``log_path``:
+
+    - When ``ok=True`` and ``log_path`` is non-empty, it **must** be an
+      artifact handle shaped ``art://YYYY-MM-DD/calls/<id>.log``. Absolute
+      filesystem paths and any other string are rejected with
+      :class:`ValueError`. This is the OpenSpec contract that the
+      agent only ever sees opaque handles; the on-disk path stays
+      internal to :mod:`localmcptools.persistence.artifacts`.
+    - When ``ok=False``, ``log_path`` is ignored (failure rows don't
+      carry an artifact handle). Tests that exercise the failure path
+      may pass ``None``.
     """
+    # Validate the handle contract before touching the DB. A bad
+    # ``log_path`` on the success path is a programmer error, not a
+    # runtime condition we want to persist.
+    #
+    # ``None`` is allowed (the call simply didn't produce an artifact,
+    # which is fine for tools whose output stays inline). Any *string*
+    # is required to be a parseable ``art://...`` handle — including
+    # the empty string, which is not a valid handle and would
+    # otherwise silently persist as a 4-byte garbage row.
+    if ok and log_path is not None:
+        try:
+            artifacts.parse_handle(log_path)
+        except artifacts.ArtifactNotFound as exc:
+            raise ValueError(
+                f"record_finish: log_path must be an 'art://...' handle "
+                f"on success, got {log_path!r} ({exc})"
+            ) from exc
+
     status = _status_from(ok, error_code)
     finished_at = _now_ms()
 

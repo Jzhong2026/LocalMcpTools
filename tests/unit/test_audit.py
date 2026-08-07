@@ -251,7 +251,7 @@ def test_record_finish_sets_approval_id(fresh_db: Path) -> None:
 
 
 def test_record_finish_log_path_accepts_artifact_handle(fresh_db: Path) -> None:
-    """``log_path`` may be an absolute path *or* an artifact handle."""
+    """``log_path`` must be a valid ``art://...`` handle on success."""
     db.init_db(fresh_db)
     call_id = str(uuid.uuid4())
     audit.record_start(
@@ -280,6 +280,102 @@ def test_record_finish_log_path_accepts_artifact_handle(fresh_db: Path) -> None:
     assert row["log_path"] == handle
 
 
+def test_record_finish_rejects_absolute_log_path(fresh_db: Path) -> None:
+    """OpenSpec contract: absolute paths in ``log_path`` are rejected.
+
+    A success row must never expose a host filesystem path; only an
+    ``art://...`` handle. This pins the contract — if a future
+    change accidentally widens the accepted forms, this test fires.
+    """
+    db.init_db(fresh_db)
+    call_id = str(uuid.uuid4())
+    audit.record_start(
+        call_id=call_id,
+        tool="workspace.inspect",
+        args_redacted="{}",
+        run_id="r-3b",
+        profile="observe",
+        policy_version="v2",
+        path=fresh_db,
+    )
+    with pytest.raises(ValueError, match="art://"):
+        audit.record_finish(
+            call_id,
+            ok=True,
+            error_code=None,
+            error_message=None,
+            duration_ms=10,
+            log_path=r"D:\AI\Projects\LocalMcpTools\secrets.log",
+            path=fresh_db,
+        )
+
+
+def test_record_finish_rejects_malformed_handle(fresh_db: Path) -> None:
+    """Anything that isn't a parseable ``art://...`` handle is rejected."""
+    db.init_db(fresh_db)
+    call_id = str(uuid.uuid4())
+    audit.record_start(
+        call_id=call_id,
+        tool="workspace.inspect",
+        args_redacted="{}",
+        run_id="r-3c",
+        profile="observe",
+        policy_version="v2",
+        path=fresh_db,
+    )
+    for bad in (
+        "not-a-handle",
+        "art://not-a-date/calls/x.log",
+        "art://2026-08-07/notcalls/x.log",
+        "art://2026-08-07/calls/x.txt",
+        "",
+    ):
+        with pytest.raises(ValueError, match="art://"):
+            audit.record_finish(
+                call_id,
+                ok=True,
+                error_code=None,
+                error_message=None,
+                duration_ms=10,
+                log_path=bad,
+                path=fresh_db,
+            )
+
+
+def test_record_finish_failure_ignores_log_path(fresh_db: Path) -> None:
+    """On ``ok=False`` the ``log_path`` is ignored — failure rows don't
+    carry an artifact handle, so we don't validate the format either."""
+    db.init_db(fresh_db)
+    call_id = str(uuid.uuid4())
+    audit.record_start(
+        call_id=call_id,
+        tool="workspace.inspect",
+        args_redacted="{}",
+        run_id="r-3d",
+        profile="observe",
+        policy_version="v2",
+        path=fresh_db,
+    )
+    # A "weird" log_path is fine on the failure path; we don't persist
+    # the success handle there anyway.
+    audit.record_finish(
+        call_id,
+        ok=False,
+        error_code="internal_error",
+        error_message="boom",
+        duration_ms=10,
+        log_path=None,
+        path=fresh_db,
+    )
+    with db.connection(fresh_db) as conn:
+        row = conn.execute(
+            "SELECT log_path, ok, status FROM calls WHERE id = ?", (call_id,)
+        ).fetchone()
+    assert row["ok"] == 0
+    assert row["status"] == "failed"
+    assert row["log_path"] is None
+
+
 def test_full_field_round_trip(fresh_db: Path) -> None:
     """One end-to-end call that exercises every column populated by change-2."""
     db.init_db(fresh_db)
@@ -289,7 +385,7 @@ def test_full_field_round_trip(fresh_db: Path) -> None:
         tool="shell.run_command",  # future tool, just for the test
         args_redacted='{"command": "echo hi"}',
         run_id=str(uuid.uuid4()),
-        profile="execute",
+        profile="workspace_exec",  # OpenSpec-canonical profile name
         policy_version="v2",
         agent="codebuddy",
         client_instance="codebuddy-xyz",
@@ -319,7 +415,7 @@ def test_full_field_round_trip(fresh_db: Path) -> None:
         "agent": "codebuddy",
         "client_instance": "codebuddy-xyz",
         "workspace_id": "ws-abc",
-        "profile": "execute",
+        "profile": "workspace_exec",
         "policy_version": "v2",
         "approval_id": "appr-test-1",
         "ok": 1,
