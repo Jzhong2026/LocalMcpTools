@@ -1,0 +1,10 @@
+{
+  "servers": {
+    "localmcptools": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["-m", "localmcptools"],
+      "cwd": "D:\\AI\\Projects\\LocalMcpTools"
+    }
+  }
+}

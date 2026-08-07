@@ -26,10 +26,12 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
-# Runtime dependencies are NOT pinned here yet — the spike (change-1)
-# locks them. See requirements.txt for current state.
+# Runtime dependencies — locked by the bootstrap-mcp-server spike. See
+# openspec/changes/bootstrap-mcp-server/design.md for the import paths
+# verified against this version. Bumps must come with a re-run of the
+# integration suite and a design.md note.
 dependencies = [
-    "mcp>=1.0,<2",   # locked in change-1 once stdio round-trip succeeds
+    "mcp==1.29.0",
     "pydantic>=2.9,<3",
     "psutil>=6.0,<7",
 ]

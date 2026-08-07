@@ -167,3 +167,98 @@ Failure scenarios and fallbacks:
 - MCP SDK API differs from current docs → update `design.md` and re-lock
 - One agent works and the other doesn't → split the spike; do not block
   on the failing agent
+
+---
+
+## Spike outcome (locked)
+
+The spike is **complete**. The integration test
+`tests/integration/test_workspace_inspect_stdio.py` drives a real
+subprocess server through the official `mcp.client.stdio.stdio_client`
++ `mcp.ClientSession` and asserts on the envelope, audit row, and
+unknown-tool error path.
+
+### Locked MCP SDK
+
+| Field | Value |
+|---|---|
+| Package | `mcp` |
+| Version | **1.29.0** |
+| Pinned in | `requirements.txt` and `pyproject.toml` |
+| Bump policy | Re-run integration tests + append a new row below before bumping. |
+
+### Import paths actually used
+
+These are the symbols imported in the spike code. Every later change
+must reuse them verbatim; renaming or downgrading breaks the locked
+contract.
+
+```python
+# Server assembly
+from mcp.server.fastmcp import FastMCP                # constructor: FastMCP(name: str | None)
+from mcp.server.fastmcp import Icon, Context           # available if a tool needs them
+
+# Decorator — registered on a FastMCP instance
+# Signature:
+#   mcp.tool(
+#       name: str | None = None,
+#       title: str | None = None,
+#       description: str | None = None,
+#       annotations: ToolAnnotations | None = None,
+#       icons: list[Icon] | None = None,
+#       meta: dict[str, Any] | None = None,
+#       structured_output: bool | None = None,
+#   )
+
+# Runtime — synchronously runs the event loop on the calling thread.
+mcp.run(transport="stdio")                            # also "sse" / "streamable-http" but unused here
+
+# Client side (used by integration tests, and by codebuddy/Copilot under the hood)
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+#   async with stdio_client(params) as (read, write):
+#       async with ClientSession(read, write) as session:
+#           await session.initialize()
+#           await session.list_tools()
+#           await session.call_tool(name, arguments=...)
+
+# Result shape — error surface for unknown tool calls.
+#   result.isError: bool            # True ⇒ the server refused
+#   result.content: list[ContentBlock]; text blocks expose .text
+```
+
+### What the spike *did not* lock
+
+- HTTP transports (`sse`, `streamable-http`). Spike is stdio only.
+- The `agent`, `client_instance`, `workspace_id`, `approval_id` columns
+  on `calls` are still always null on the wire — populated in change-3.
+- Any redact-before-persist logic. The audit module stores whatever
+  the caller passes; the spike passes the raw MCP args (the
+  `placeholder` field contains no secrets).
+
+### Known FastMCP quirks worth remembering
+
+- **Pipelining required.** The MCP SDK rejects `tools/list` with
+  `-32602 Invalid request parameters` if it arrives before the
+  server has processed `notifications/initialized`. Either pipeline
+  the three messages (initialize + notification + tools/list) in a
+  single write, or use the official client which handles this.
+- **`FastMCP.run()` is synchronous** and starts its own event loop.
+  Don't call it from inside an existing asyncio loop.
+- **Tool result is wrapped in a `ContentBlock`.** Even when the
+  tool returns a JSON dict, FastMCP puts it in a single
+  `{"type": "text", "text": "<json>"}` block. Use the structured
+  output pathway (`structured_output=True`) only when the tool's
+  return type is itself a `BaseModel` — we don't need it for the
+  spike.
+
+### DoD checklist (passed)
+
+- [x] `workspace.inspect` registered exactly once
+- [x] stdio transport only — no HTTP listener, no `server.json` written
+- [x] `python -m localmcptools start` blocks on stdio without crashing
+- [x] Unknown tool call returns `isError=True` with no Python traceback
+- [x] Successful call lands in `audit.sqlite` with `ok=1`, `status=success`,
+      `profile=observe`, `policy_version=spike-0`
+- [x] `LMCP_DATA_DIR` env override tested (unit + integration)
+- [x] `requirements.txt` + `pyproject.toml` pinned to `mcp==1.29.0`
