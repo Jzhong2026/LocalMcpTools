@@ -99,10 +99,12 @@ def _probe_console_encoding_via_powershell() -> str:
 
 def _get_console_encoding() -> str:
     with _cache_lock:
-        if _encoding_cache["text"] is not None and (
+        cached: Any = _encoding_cache["text"]
+        if cached is not None and (
             time.monotonic() - _encoding_cache["at"] < _ENCODING_TTL_S
         ):
-            return _encoding_cache["text"]
+            text_cached: str = cached
+            return text_cached
     text = _probe_console_encoding_via_powershell()
     with _cache_lock:
         _encoding_cache["text"] = text
@@ -158,10 +160,12 @@ def _probe_is_admin() -> bool | None:
 
 def _get_is_admin() -> bool | None:
     with _cache_lock:
-        if _isadmin_cache["value"] is not None and (
+        cached: Any = _isadmin_cache["value"]
+        if cached is not None and (
             time.monotonic() - _isadmin_cache["at"] < _ISADMIN_TTL_S
         ):
-            return _isadmin_cache["value"]
+            val_cached: bool = cached
+            return val_cached
     val = _probe_is_admin()
     with _cache_lock:
         _isadmin_cache["value"] = val

@@ -21,7 +21,6 @@ import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-
 # Tools that MUST be exposed by the server after change-2.
 EXPECTED_TOOLS = {
     "environment.get",

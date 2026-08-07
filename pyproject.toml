@@ -94,5 +94,5 @@ warn_return_any = true
 disallow_untyped_defs = true
 
 [[tool.mypy.overrides]]
-module = ["mcp.*"]
+module = ["mcp.*", "chardet"]
 ignore_missing_imports = true

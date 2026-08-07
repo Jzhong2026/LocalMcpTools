@@ -30,10 +30,10 @@ import logging
 import os
 import time
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from ..persistence import audit, db
 from ..safety.redact import redact
@@ -413,7 +413,7 @@ def _synthesise_wrapper(
         "_service": service,
     }
     exec(compile(src, f"<lmcp-tool {reg.tool}>", "exec"), ns)
-    fn = ns[fn_name]
+    fn: Callable[..., dict[str, Any]] = ns[fn_name]
     fn.__doc__ = reg.description or f"Tool: {reg.tool}"
     return fn
 

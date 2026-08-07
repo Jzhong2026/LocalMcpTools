@@ -22,7 +22,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from ..workspaces import inspect as ws_inspect
 from ..workspaces.registry import (
@@ -48,8 +48,8 @@ _BINARY_SNIFF_BYTES = 8 * 1024
 
 def workspace_register(args: dict[str, Any]) -> Any:
     """Register a directory. Returns ``{workspace_id, canonical_root, profile}``."""
-    path = args.get("path")
-    if not isinstance(path, str) or not path:
+    path_raw = args.get("path")
+    if not isinstance(path_raw, str) or not path_raw:
         fail(
             code="invalid_args",
             message="`path` must be a non-empty absolute directory string",
@@ -59,6 +59,7 @@ def workspace_register(args: dict[str, Any]) -> Any:
             suggestion="pass `path` as an absolute Windows path, e.g. "
                        "`D:\\\\AI\\\\Projects\\\\MyApp`",
         )
+    path = cast("str", path_raw)
     try:
         ws = register(path, profile="observe", notes=args.get("notes"))
     except InvalidPath as exc:
@@ -149,8 +150,8 @@ def workspace_inspect(args: dict[str, Any]) -> Any:
 
 def workspace_search_text(args: dict[str, Any]) -> Any:
     ws = _resolve_workspace(args.get("workspace_id"), "workspace.search_text")
-    pattern = args.get("pattern")
-    if not isinstance(pattern, str) or not pattern:
+    pattern_raw = args.get("pattern")
+    if not isinstance(pattern_raw, str) or not pattern_raw:
         fail(
             code="invalid_args",
             message="`pattern` must be a non-empty string",
@@ -160,6 +161,7 @@ def workspace_search_text(args: dict[str, Any]) -> Any:
             suggestion="pass a regex (Python re syntax), e.g. 'TODO|FIXME'",
             workspace_id=ws.id,
         )
+    pattern = cast("str", pattern_raw)
     try:
         rx = re.compile(pattern)
     except re.error as exc:

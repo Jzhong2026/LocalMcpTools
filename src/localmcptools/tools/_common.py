@@ -123,7 +123,7 @@ class ToolResponse(BaseModel):
         blocked_by: str | None = None,
         severity: str | None = None,
         approval_id: str | None = None,
-    ) -> "ToolResponse":
+    ) -> ToolResponse:
         """Attach error-context fields and return ``self``.
 
         Used by the :func:`fail` helper to materialise an error

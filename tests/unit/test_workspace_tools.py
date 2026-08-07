@@ -56,7 +56,6 @@ def test_register_is_idempotent(fresh_db: Path, project_dir: Path) -> None:
 
 
 def test_register_rejects_path_escape(fresh_db: Path, tmp_path: Path) -> None:
-    from localmcptools.tools._errors import fail
     with pytest.raises(Exception):
         # ``fail`` raises ``ToolErrorResponse`` which is a subclass of Exception
         workspace_register({"path": str(tmp_path) + "/../etc"})

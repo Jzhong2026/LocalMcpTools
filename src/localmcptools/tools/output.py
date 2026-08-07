@@ -13,12 +13,18 @@ so the agent can tell "wrong handle" from "file vanished".
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from ..persistence.artifacts import (
     ArtifactNotFound,
+)
+from ..persistence.artifacts import (
     read_range as _read_range,
+)
+from ..persistence.artifacts import (
     search as _search,
+)
+from ..persistence.artifacts import (
     tail as _tail,
 )
 from ._errors import fail
@@ -34,7 +40,8 @@ def _check_handle(handle: Any, tool: str) -> str:
             run_id="pending",
             suggestion="use the `meta.output_handle` returned by the producing tool",
         )
-    return handle
+    result: str = handle
+    return result
 
 
 def output_tail(args: dict[str, Any]) -> Any:
@@ -95,8 +102,8 @@ def output_read_range(args: dict[str, Any]) -> Any:
 
 def output_search(args: dict[str, Any]) -> Any:
     handle = _check_handle(args.get("handle"), "output.search")
-    pattern = args.get("pattern")
-    if not isinstance(pattern, str) or not pattern:
+    pattern_raw = args.get("pattern")
+    if not isinstance(pattern_raw, str) or not pattern_raw:
         fail(
             code="invalid_args",
             message="`pattern` must be a non-empty regex",
@@ -104,6 +111,7 @@ def output_search(args: dict[str, Any]) -> Any:
             audit_id="pending",
             run_id="pending",
         )
+    pattern = cast("str", pattern_raw)
     try:
         max_results = int(args.get("max_results") or 200)
     except (TypeError, ValueError):

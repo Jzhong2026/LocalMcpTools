@@ -19,7 +19,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from ..workspaces.registry import (
     InvalidPath,
@@ -227,8 +227,8 @@ def fs_tail_log_file(args: dict[str, Any]) -> Any:
 
 def fs_grep_files(args: dict[str, Any]) -> Any:
     ws = _resolve_ws(args.get("workspace_id"), "fs.grep_files")
-    pattern = args.get("pattern")
-    if not isinstance(pattern, str) or not pattern:
+    pattern_raw = args.get("pattern")
+    if not isinstance(pattern_raw, str) or not pattern_raw:
         fail(
             code="invalid_args",
             message="`pattern` must be a non-empty regex",
@@ -238,6 +238,7 @@ def fs_grep_files(args: dict[str, Any]) -> Any:
             suggestion="Python re syntax only",
             workspace_id=ws.id,
         )
+    pattern = cast("str", pattern_raw)
     try:
         rx = re.compile(pattern)
     except re.error as exc:
