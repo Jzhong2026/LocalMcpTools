@@ -63,7 +63,23 @@ def output_tail(args: dict[str, Any]) -> Any:
             run_id="pending",
             suggestion="verify the handle came from the producing tool's meta.output_handle",
         )
-    return {"lines": lines, "handle": handle, "evidence_handle": handle}
+    # REQ-OUT-2: the agent reads the same handle from
+    # ``meta.evidence_handle`` (idempotent confirmation that we are
+    # paging the artifact produced by the originating call). The
+    # ``data`` block returns only the content, not the handle.
+    from ._common import ToolMeta, ToolResponse
+    meta = ToolMeta(
+        tool="output.tail",
+        duration_ms=0,  # chokepoint overwrites
+        audit_id="pending",  # chokepoint overwrites
+        run_id="pending",  # chokepoint overwrites
+        output_handle=handle,
+        evidence_handle=handle,
+    )
+    return ToolResponse.ok_response(
+        data={"lines": lines, "handle": handle},
+        meta=meta,
+    )
 
 
 def output_read_range(args: dict[str, Any]) -> Any:

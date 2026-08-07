@@ -76,6 +76,10 @@ class ToolMeta(BaseModel):
     # registered workspace. ``None`` is the spike-default for tools
     # that don't need a workspace (e.g. ``environment.get``).
     workspace_id: str | None = None
+    # REQ-OUT-2: ``output.tail`` returns the same handle on
+    # ``meta.evidence_handle`` so the agent can confirm it is paging
+    # the artifact produced by the originating call (idempotent).
+    evidence_handle: str | None = None
     # Hints the agent can act on without re-asking. Free-form strings;
     # stable labels ("show_audit", "open_artifact") are preferred.
     next_actions: list[str] = Field(default_factory=list)

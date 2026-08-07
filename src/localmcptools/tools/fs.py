@@ -159,17 +159,41 @@ def fs_read_range(args: dict[str, Any]) -> Any:
             run_id="pending",
             workspace_id=ws.id,
         )
-    text = _read_text_capped(p, max_bytes=_MAX_FILE_BYTES)
-    all_lines = text.splitlines()
+    # Stream the requested range rather than slicing a head-truncated
+    # text blob. Counting ``\n`` while we read gives an exact
+    # ``total_lines`` regardless of file size.
     if end_line <= start_line:
-        lines: list[str] = []
-    else:
-        lines = all_lines[start_line:end_line]
+        return {"lines": [], "total_lines": _count_lines(p), "path": p.name}
+    lines: list[str] = []
+    total_lines = 0
+    current_line = 0
+    with p.open("r", encoding="utf-8", errors="replace") as fh:
+        for raw_line in fh:
+            total_lines += 1
+            if current_line >= start_line and current_line < end_line:
+                # Strip the trailing newline for consistency with
+                # ``tail`` / ``read_range`` callers that expect clean
+                # strings in the ``lines`` array.
+                lines.append(raw_line.rstrip("\n"))
+            current_line += 1
     return {
         "lines": lines,
-        "total_lines": len(all_lines),
+        "total_lines": total_lines,
         "path": p.name,
     }
+
+
+def _count_lines(path: Path) -> int:
+    """Count ``\\n`` in a file without loading it into memory."""
+    count = 0
+    chunk_size = 64 * 1024
+    with path.open("rb") as fh:
+        while True:
+            chunk = fh.read(chunk_size)
+            if not chunk:
+                break
+            count += chunk.count(b"\n")
+    return count
 
 
 def fs_tail_log_file(args: dict[str, Any]) -> Any:

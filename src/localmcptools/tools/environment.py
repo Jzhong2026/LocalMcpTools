@@ -60,23 +60,38 @@ _cache_lock = threading.Lock()
 def _probe_console_encoding_via_powershell() -> str:
     """Run a tiny PowerShell command and let ``chardet`` classify it.
 
-    We emit a sentence with mixed ASCII + Chinese characters and
-    verify chardet picks a sane codec. On a Chinese Windows host the
-    legacy ``Write-Output`` (no BOM, no explicit encoding) defaults to
-    the active console code page — which is exactly what we want to
-    surface to the agent.
+    The probe string is deliberately chosen so its byte representation
+    differs across common console code pages:
+
+    - UTF-8:            b'\\xe4\\xb8\\xad\\xe6\\x96\\x87 hello' (6 bytes for the
+                        Chinese characters)
+    - GBK / GB2312:     b'\\xd6\\xd0\\xce\\xc4 hello'             (4 bytes)
+    - UTF-16 LE:        b'\\x2d\\x4e\\x87\\x65 ... hello'         (BOM + pairs)
+    - CP-1252:          invalid for these bytes; chardet returns
+                        Windows-1252 with low confidence and we treat
+                        it as ``cp1252``.
+
+    A pure-ASCII probe would always come back as ``ascii`` and tell us
+    nothing about the console code page; mixing in a CJK character is
+    the cheapest way to make the encodings distinguishable. The string
+    is intentionally short (one phrase + 5 ASCII bytes) so the probe
+    runs in <50ms even on a slow CI box.
     """
     try:
         import chardet  # local import; optional dependency
     except ImportError:
         return "unknown"
 
+    # We hand PowerShell a literal that *must* round-trip through the
+    # active console code page. ``[Console]::OutputEncoding`` is set
+    # so ``Write-Output`` produces bytes in that encoding (no BOM).
+    probe_literal = '"中文 hello"'
     try:
         proc = subprocess.run(
             ["powershell.exe", "-NoProfile", "-NonInteractive",
              "-Command",
-             "$OutputEncoding = [Console]::OutputEncoding; "
-             "Write-Output 'LocalMcpTools encoding probe: hello world.'"],
+             f"$OutputEncoding = [Console]::OutputEncoding; "
+             f"Write-Output {probe_literal}"],
             capture_output=True,
             timeout=5.0,
         )
@@ -89,10 +104,18 @@ def _probe_console_encoding_via_powershell() -> str:
         return "unknown"
     det = chardet.detect(raw)
     encoding = (det.get("encoding") or "unknown").lower()
+    confidence = float(det.get("confidence") or 0.0)
+    # chardet can mis-classify with low confidence when the buffer is
+    # tiny; treat anything below 0.5 as unknown so we don't lie to
+    # the agent about what we're seeing.
+    if confidence < 0.5:
+        return "unknown"
     # Normalise a few common aliases.
     alias = {
         "gb2312": "gbk",
         "gb18030": "gbk",
+        "utf-8-sig": "utf-8",
+        "windows-1252": "cp1252",
     }.get(encoding, encoding)
     return alias or "unknown"
 

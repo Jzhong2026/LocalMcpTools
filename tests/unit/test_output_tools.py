@@ -23,8 +23,19 @@ def test_output_tail(fresh_db: Path) -> None:
     content = "\n".join(f"line {i}" for i in range(50)) + "\n"
     handle = artifacts.write(content, call_id="test-tail", conn=conn)
     res = output_tail({"handle": handle, "n": 5})
-    assert res["lines"] == ["line 45", "line 46", "line 47", "line 48", "line 49"]
-    assert res["handle"] == handle
+    # ``output.tail`` returns a ToolResponse; the chokepoint wraps it.
+    # At the unit-test level we get the ToolResponse directly so
+    # assert against its data + meta fields.
+    from localmcptools.tools._common import ToolResponse
+    assert isinstance(res, ToolResponse)
+    assert res.ok is True
+    assert res.data["lines"] == [
+        "line 45", "line 46", "line 47", "line 48", "line 49"
+    ]
+    assert res.data["handle"] == handle
+    # REQ-OUT-2: the handle is mirrored on meta.evidence_handle.
+    assert res.meta.evidence_handle == handle
+    assert res.meta.output_handle == handle
 
 
 def test_output_read_range(fresh_db: Path) -> None:

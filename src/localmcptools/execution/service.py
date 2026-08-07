@@ -26,6 +26,7 @@ real ``%APPDATA%`` database.
 from __future__ import annotations
 
 import inspect
+import json
 import logging
 import os
 import time
@@ -261,6 +262,17 @@ class ToolExecutionService:
         Always writes both ``record_start`` and ``record_finish`` audit
         rows. Exceptions become ``internal_error`` envelopes. The
         returned dict is what FastMCP serialises to the agent.
+
+        Cross-cutting concerns handled here:
+
+        - **workspace context**: if the agent supplied a
+          ``workspace_id``, it ends up on both ``meta.workspace_id``
+          and the audit row.
+        - **artifact storage**: responses over 64 KiB are persisted to
+          an artifact and replaced with a summary + handle.
+        - **envelope invariants**: ``meta.tool``, ``audit_id``,
+          ``run_id``, ``duration_ms`` are filled in from the chokepoint,
+          not from the tool body.
         """
         call_id = str(uuid.uuid4())
         run_id = str(uuid.uuid4())
@@ -271,6 +283,12 @@ class ToolExecutionService:
         if self._audit_path is not None:
             db.init_db(self._audit_path)
 
+        # Extract workspace context from the agent-supplied args. The
+        # tool body may independently re-resolve / re-validate; the
+        # chokepoint only forwards strings that look like UUIDs so
+        # we don't poison the audit row with arbitrary text.
+        workspace_id = _extract_workspace_id(args)
+
         audit.record_start(
             call_id=call_id,
             tool=registration.tool,
@@ -280,7 +298,7 @@ class ToolExecutionService:
             policy_version=self._policy_version,
             agent=None,  # populated in change-3 when agent self-advertises
             client_instance=registration.default_client_instance,
-            workspace_id=registration.default_workspace_id,
+            workspace_id=workspace_id or registration.default_workspace_id,
             pid=os.getpid(),
             path=self._audit_path,
         )
@@ -293,22 +311,31 @@ class ToolExecutionService:
             # happens *before* any business work but after we already
             # inserted the audit row, so we still need to update it.
             envelope = raised.response
-            envelope.meta = _meta(registration, call_id, run_id,
-                                  int((time.monotonic() - started) * 1000),
-                                  extra=registration.extra_meta)
+            duration_ms = int((time.monotonic() - started) * 1000)
+            evidence_handle_err: str | None = envelope.meta.evidence_handle or None
+            envelope.meta = _meta(
+                registration, call_id, run_id, duration_ms,
+                workspace_id=workspace_id,
+                evidence_handle=evidence_handle_err,
+                extra=registration.extra_meta,
+            )
             envelope.meta.audit_id = call_id
             envelope.meta.run_id = run_id
             envelope.meta.tool = registration.tool
-            duration_ms = envelope.meta.duration_ms
+            envelope_dict = envelope.model_dump()
+            handle = _maybe_persist_artifact(
+                envelope_dict, call_id, self._audit_path
+            )
             audit.record_finish(
                 call_id,
                 ok=False,
                 error_code=envelope.error.code if envelope.error else None,
                 error_message=envelope.error.message if envelope.error else None,
                 duration_ms=duration_ms,
+                log_path=handle,
                 path=self._audit_path,
             )
-            return envelope.model_dump()
+            return envelope_dict
         except Exception as exc:  # noqa: BLE001 — must catch everything
             duration_ms = int((time.monotonic() - started) * 1000)
             msg = _safe_message(exc)
@@ -320,36 +347,64 @@ class ToolExecutionService:
                 duration_ms=duration_ms,
                 path=self._audit_path,
             )
-            meta = _meta(registration, call_id, run_id, duration_ms,
-                         extra=registration.extra_meta)
-            return ToolResponse.error_response(
+            meta = _meta(
+                registration, call_id, run_id, duration_ms,
+                workspace_id=workspace_id,
+                extra=registration.extra_meta,
+            )
+            envelope = ToolResponse.error_response(
                 code="internal_error",
                 message=msg,
                 meta=meta,
                 suggestion="check server logs",
                 severity="critical",
-            ).model_dump()
+            )
+            envelope_dict = envelope.model_dump()
+            _maybe_persist_artifact(envelope_dict, call_id, self._audit_path)
+            return envelope_dict
 
         duration_ms = int((time.monotonic() - started) * 1000)
+        evidence_handle: str | None = None
+        if isinstance(result, ToolResponse):
+            # The tool body returned a fully-built envelope. Pull out
+            # any evidence_handle it set (output.tail uses this) so
+            # we don't clobber it when we rebuild meta below.
+            evidence_handle = result.meta.evidence_handle or None
+            meta = _meta(
+                registration, call_id, run_id, duration_ms,
+                workspace_id=workspace_id,
+                evidence_handle=evidence_handle,
+                extra=registration.extra_meta,
+            )
+            # Preserve any next_actions the tool pre-populated.
+            if result.meta.next_actions:
+                meta.next_actions = list(result.meta.next_actions)
+            result.meta = meta
+            envelope_dict = result.model_dump()
+        else:
+            meta = _meta(
+                registration, call_id, run_id, duration_ms,
+                workspace_id=workspace_id,
+                extra=registration.extra_meta,
+            )
+            envelope_dict = ToolResponse.ok_response(
+                data=result, meta=meta
+            ).model_dump()
+
+        # Persist oversize bodies as artifacts before the audit row is
+        # finished so ``log_path`` and ``meta.output_handle`` agree.
+        handle = _maybe_persist_artifact(envelope_dict, call_id, self._audit_path)
+
         audit.record_finish(
             call_id,
             ok=True,
             error_code=None,
             error_message=None,
             duration_ms=duration_ms,
+            log_path=handle,
             path=self._audit_path,
         )
-
-        meta = _meta(registration, call_id, run_id, duration_ms,
-                     extra=registration.extra_meta)
-        if isinstance(result, ToolResponse):
-            # Refresh the meta fields on whatever the tool returned.
-            # We intentionally don't replace ``data``; the tool may have
-            # populated it for an ``ok=True`` partial-success variant.
-            result.meta = meta
-            return result.model_dump()
-
-        return ToolResponse.ok_response(data=result, meta=meta).model_dump()
+        return envelope_dict
 
 
 # --- Wrapper the FastMCP decorator uses ---------------------------------
@@ -433,9 +488,18 @@ def _meta(
     run_id: str,
     duration_ms: int,
     *,
+    workspace_id: str | None = None,
+    evidence_handle: str | None = None,
     extra: dict[str, Any] | None = None,
 ) -> ToolMeta:
-    """Build a :class:`ToolMeta` for a successful call."""
+    """Build a :class:`ToolMeta` with every documented field populated.
+
+    The chokepoint passes ``workspace_id`` extracted from the agent's
+    args (when present) so workspace-scoped tools always advertise
+    which workspace they ran against. ``evidence_handle`` is set by
+    :func:`output.tail` per REQ-OUT-2 (the same handle on both
+    ``meta.output_handle`` and ``meta.evidence_handle``).
+    """
     base_extra = dict(registration.extra_meta)
     if extra:
         base_extra.update(extra)
@@ -445,6 +509,10 @@ def _meta(
         audit_id=audit_id,
         run_id=run_id,
     )
+    if workspace_id is not None:
+        meta.workspace_id = workspace_id
+    if evidence_handle is not None:
+        meta.evidence_handle = evidence_handle
     # ``next_actions`` and ``output_handle`` are first-class fields on
     # ToolMeta. Anything else from extra_meta lands in a side-channel
     # that the server attaches below — but for now we only forward
@@ -459,6 +527,67 @@ def _meta(
     if log_path is not None:
         meta.log_path = log_path
     return meta
+
+
+def _extract_workspace_id(args: dict[str, Any]) -> str | None:
+    """Pick the ``workspace_id`` out of an args dict if it looks like one.
+
+    A workspace_id is a UUID4 hex string (32 chars). We don't enforce
+    that it actually resolves to a row — the tool body is the
+    authority for that — but we only forward strings of that shape so
+    a hostile agent can't poison the audit row with arbitrary junk.
+    """
+    val = args.get("workspace_id")
+    if not isinstance(val, str):
+        return None
+    if not val:
+        return None
+    # UUID4 hex — 32 lowercase hex chars. Anything else is ignored.
+    if len(val) >= 16 and all(c in "0123456789abcdef-" for c in val):
+        return val
+    return None
+
+
+# Import lazily here to avoid the import cycle between this module
+# (which :mod:`tools._errors` already pulls in) and the artifact
+# module (which pulls in the audit module).
+def _maybe_persist_artifact(
+    envelope_dict: dict[str, Any],
+    call_id: str,
+    audit_path: Path | None,
+) -> str | None:
+    """If the serialised response exceeds 64 KiB, persist it.
+
+    Rewrites the envelope in place so ``data`` carries a summary
+    (bytes/lines truncated flag) and ``meta.output_handle`` points
+    at the new artifact. Returns the handle, or ``None`` if the
+    response fit inline.
+
+    The audit row's ``log_path`` column is populated on
+    :func:`record_finish` via the handle we return — the caller
+    passes it back into the audit finish call.
+    """
+    # Local import to avoid the circular dependency at module load.
+    from ..persistence import artifacts
+
+    raw = json.dumps(envelope_dict, ensure_ascii=False, default=str).encode(
+        "utf-8"
+    )
+    if len(raw) <= artifacts.INLINE_THRESHOLD_BYTES:
+        return None
+    # Build a stable summary block so the agent still sees *something*.
+    payload_text = raw.decode("utf-8", errors="replace")
+    summary = {
+        "truncated": True,
+        "bytes_total": len(raw),
+        "note": "response exceeded 64 KiB; full body persisted to artifact",
+    }
+    envelope_dict["data"] = summary
+    envelope_dict["meta"]["output_handle"] = None
+    # Redact+write the full envelope so secrets don't leak to disk.
+    handle = artifacts.write(payload_text, call_id=call_id)
+    envelope_dict["meta"]["output_handle"] = handle
+    return handle
 
 
 def _safe_message(exc: BaseException) -> str:
