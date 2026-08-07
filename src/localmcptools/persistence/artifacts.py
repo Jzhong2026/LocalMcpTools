@@ -38,6 +38,7 @@ from pathlib import Path
 
 from ..config.paths import data_dir
 from ..safety.redact import redact
+from . import db as _db_mod
 from .db import get_connection
 
 _log = logging.getLogger(__name__)
@@ -228,6 +229,7 @@ def write(
         )
 
     if conn is None:
+        _db_mod.init_db()
         with get_connection() as c:
             _do(c)
     else:
@@ -312,6 +314,7 @@ def lookup(handle: str, conn: sqlite3.Connection | None = None) -> ArtifactRecor
         )
 
     if conn is None:
+        _db_mod.init_db()
         with get_connection() as c:
             return _do(c)
     return _do(conn)

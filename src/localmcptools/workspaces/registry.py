@@ -36,7 +36,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..persistence.db import get_connection
+from ..persistence import db
 
 _log = logging.getLogger(__name__)
 
@@ -218,7 +218,8 @@ def register(
         )
 
     if conn is None:
-        with get_connection() as c:
+        db.init_db()
+        with db.get_connection() as c:
             return _do(c)
     return _do(conn)
 
@@ -250,7 +251,8 @@ def resolve(workspace_id: str, conn: sqlite3.Connection | None = None) -> Worksp
         )
 
     if conn is None:
-        with get_connection() as c:
+        db.init_db()
+        with db.get_connection() as c:
             return _do(c)
     return _do(conn)
 
@@ -274,7 +276,8 @@ def list_workspaces(conn: sqlite3.Connection | None = None) -> list[Workspace]:
         ]
 
     if conn is None:
-        with get_connection() as c:
+        db.init_db()
+        with db.get_connection() as c:
             return _do(c)
     return _do(conn)
 

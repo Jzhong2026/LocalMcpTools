@@ -72,6 +72,10 @@ class ToolMeta(BaseModel):
     log_path: str | None = None
     run_id: str
     output_handle: str | None = None
+    # ``workspace_id`` is non-null for any tool that operates on a
+    # registered workspace. ``None`` is the spike-default for tools
+    # that don't need a workspace (e.g. ``environment.get``).
+    workspace_id: str | None = None
     # Hints the agent can act on without re-asking. Free-form strings;
     # stable labels ("show_audit", "open_artifact") are preferred.
     next_actions: list[str] = Field(default_factory=list)
@@ -111,6 +115,31 @@ class ToolResponse(BaseModel):
     ) -> ToolResponse:
         """Build a successful response."""
         return cls(ok=True, data=data, meta=meta, error=None)
+
+    def to_envelope(
+        self,
+        *,
+        suggestion: str | None = None,
+        blocked_by: str | None = None,
+        severity: str | None = None,
+        approval_id: str | None = None,
+    ) -> "ToolResponse":
+        """Attach error-context fields and return ``self``.
+
+        Used by the :func:`fail` helper to materialise an error
+        response with a fully-built ``meta``. Keeps the call-site
+        short while preserving the strict ``code`` registry.
+        """
+        if self.error is not None:
+            if suggestion is not None:
+                self.error.suggestion = suggestion
+            if blocked_by is not None:
+                self.error.blocked_by = blocked_by
+            if severity is not None:
+                self.error.severity = severity
+            if approval_id is not None:
+                self.error.approval_id = approval_id
+        return self
 
     @classmethod
     def error_response(

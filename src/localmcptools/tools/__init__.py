@@ -1,5 +1,16 @@
 """MCP tools exposed by the server.
 
-Each module here registers one or more tools with the FastMCP instance.
-The envelope (ToolResponse / ToolMeta / ToolError) is in _common.py.
+Each module here exposes a tool body (a callable ``(args) -> result``)
+that :mod:`localmcptools.server` registers with the
+:class:`ToolExecutionService`.
+
+The envelope (ToolResponse / ToolMeta / ToolError) is in :mod:`._common`.
+The single audit + envelope chokepoint is in
+:mod:`localmcptools.execution.service`.
 """
+
+from __future__ import annotations
+
+from . import environment, fs, output, workspace
+
+__all__ = ["environment", "fs", "output", "workspace"]
