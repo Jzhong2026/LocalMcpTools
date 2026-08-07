@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import cast
 
 from mcp.server.fastmcp import FastMCP
 
@@ -36,7 +37,7 @@ from .execution.service import (
     ToolExecutionService,
 )
 from .persistence.db import init_db
-from .tools import environment, fs, output, shell, workspace
+from .tools import environment, fs, output, process, shell, workspace
 
 _log = logging.getLogger(__name__)
 
@@ -64,7 +65,9 @@ def build_server(
         policy_version=policy_version,
     )
     _register_tools(service)
-    return _build_fast_mcp(service)
+    mcp = _build_fast_mcp(service)
+    mcp._lmcp_execution_service = service  # type: ignore[attr-defined]
+    return mcp
 
 
 # --- Tool registration ----------------------------------------------------
@@ -227,6 +230,43 @@ def _register_tools(service: ToolExecutionService) -> None:
         param_names=("workspace_id", "cmd", "timeout_ms", "env", "approval_id", "cwd"),
     )
 
+    wrappers["process.start_dev_server"] = service.register(
+        "process.start_dev_server", process.process_start_dev_server,
+        title="Start managed development server",
+        description="Start an approved preset inside a registered workspace and bind its lifecycle to this MCP server.",
+        param_names=("workspace_id", "preset", "args", "approval_id"),
+    )
+    wrappers["process.get_status"] = service.register(
+        "process.get_status", process.process_get_status,
+        title="Get managed process status",
+        description="Return status, duration, exit code, port and recent output for a managed process.",
+        param_names=("id",),
+    )
+    wrappers["process.list_managed"] = service.register(
+        "process.list_managed", process.process_list_managed,
+        title="List managed processes",
+        description="List lifecycle-bound processes, optionally filtered by workspace.",
+        param_names=("workspace_id",),
+    )
+    wrappers["process.stop_managed"] = service.register(
+        "process.stop_managed", process.process_stop_managed,
+        title="Stop managed process",
+        description="Stop a managed process tree after one-time human approval.",
+        param_names=("id", "graceful", "approval_id"),
+    )
+    wrappers["process.list_listening_ports"] = service.register(
+        "process.list_listening_ports", process.process_list_listening_ports,
+        title="List TCP listeners",
+        description="Read-only list of TCP listening sockets and their managed-process association.",
+        param_names=(),
+    )
+    wrappers["process.find_by_port"] = service.register(
+        "process.find_by_port", process.process_find_by_port,
+        title="Find TCP listener by port",
+        description="Return the listener bound to a TCP port without exposing arbitrary PID termination.",
+        param_names=("port",),
+    )
+
     # Attach the wrappers to the service so _build_fast_mcp can pull
     # them out and register with the MCP server.
     service._wrappers = wrappers  # type: ignore[attr-defined]
@@ -253,8 +293,19 @@ def _build_fast_mcp(service: ToolExecutionService) -> FastMCP:
 
 def run_stdio() -> None:
     """Boot the server in stdio mode. Blocks until the parent exits."""
+    from .execution.background import shutdown_runtime, start_runtime
+
     server = build_server()
-    server.run(transport="stdio")
+    start_runtime()
+    try:
+        server.run(transport="stdio")
+    finally:
+        service = cast(
+            ToolExecutionService,
+            server._lmcp_execution_service,  # type: ignore[attr-defined]
+        )
+        service.begin_shutdown(5.0)
+        shutdown_runtime()
 
 
 __all__ = ["SERVER_NAME", "build_server", "run_stdio"]

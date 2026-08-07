@@ -15,10 +15,15 @@ Exit codes follow the usual conventions:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
+import os
+import subprocess
 import sys
+import time
 from collections.abc import Sequence
 
+from .config.paths import server_json_path
 from .persistence.db import is_initialised
 from .server import run_stdio
 
@@ -91,9 +96,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if sub == "start":
         return _cmd_start()
     if sub == "stop":
-        return _cmd_stub("stop")
+        return _cmd_stop()
     if sub == "status":
-        return _cmd_stub("status")
+        return _cmd_status()
     if sub == "install":
         return _cmd_stub("install")
 
@@ -115,11 +120,66 @@ def _cmd_start() -> int:
         f"(audit db initialised={is_initialised()})",
         file=sys.stderr,
     )
+    state_path = server_json_path()
+    state_path.write_text(json.dumps({
+        "pid": os.getpid(), "started_at": int(time.time() * 1000), "transport": "stdio"
+    }), encoding="utf-8")
     try:
         run_stdio()
     except KeyboardInterrupt:
         # Parent (agent) sent SIGINT — that's a clean shutdown.
         return EXIT_OK
+    finally:
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            if state.get("pid") == os.getpid():
+                state_path.unlink(missing_ok=True)
+        except (OSError, json.JSONDecodeError):
+            pass
+    return EXIT_OK
+
+
+def _read_server_pid() -> int | None:
+    try:
+        value = json.loads(server_json_path().read_text(encoding="utf-8")).get("pid")
+        return value if isinstance(value, int) and value > 0 else None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _cmd_status() -> int:
+    pid = _read_server_pid()
+    if pid is None:
+        print("[localmcptools] server is not running", file=sys.stderr)
+        return EXIT_ERROR
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        server_json_path().unlink(missing_ok=True)
+        print(f"[localmcptools] stale server metadata removed (pid={pid})", file=sys.stderr)
+        return EXIT_ERROR
+    print(f"[localmcptools] server is running (pid={pid})", file=sys.stderr)
+    return EXIT_OK
+
+
+def _cmd_stop() -> int:
+    pid = _read_server_pid()
+    if pid is None:
+        print("[localmcptools] server is not running", file=sys.stderr)
+        return EXIT_ERROR
+    try:
+        if os.name == "nt":
+            result = subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T"], check=False,
+                capture_output=True, timeout=10,
+            )
+            if result.returncode != 0:
+                return EXIT_ERROR
+        else:
+            import signal
+            os.kill(pid, signal.SIGTERM)
+    except (OSError, subprocess.SubprocessError):
+        return EXIT_ERROR
     return EXIT_OK
 
 

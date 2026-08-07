@@ -9,3 +9,4 @@
 mcp==1.29.0
 pydantic>=2.9,<3
 psutil>=6.0,<7
+pywin32>=306; sys_platform == "win32"

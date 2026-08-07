@@ -21,15 +21,24 @@ class RunResult:
     timed_out: bool
 
 
+class UseStartDevServer(ValueError):
+    """A caller attempted long-running work through the bounded runner."""
+
+
 async def run(
     argv: Sequence[str], *, cwd: str, env: Mapping[str, str] | None = None,
     timeout_ms: int = 120_000, gate: ConcurrencyGate | None = None,
+    reject_long_running: bool = False,
 ) -> RunResult:
     """Run an argv vector, interleave output, and return timeout as data."""
     if not argv:
         raise ValueError("argv must not be empty")
     if timeout_ms <= 0:
         raise ValueError("timeout_ms must be positive")
+    if reject_long_running and timeout_ms >= 60_000:
+        raise UseStartDevServer(
+            "timeout_ms >= 60000 must use process.start_dev_server"
+        )
     active_gate = gate or ConcurrencyGate()
     async with active_gate.slot():
         process = await asyncio.create_subprocess_exec(
@@ -75,4 +84,4 @@ async def _terminate_tree(process: asyncio.subprocess.Process) -> None:
         await process.wait()
 
 
-__all__ = ["RunResult", "run"]
+__all__ = ["RunResult", "UseStartDevServer", "run"]

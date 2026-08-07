@@ -47,6 +47,7 @@ def record_start(
     agent: str | None = None,
     client_instance: str | None = None,
     workspace_id: str | None = None,
+    approval_id: str | None = None,
     pid: int | None = None,
     conn: sqlite3.Connection | None = None,
     path: Path | None = None,
@@ -76,7 +77,7 @@ def record_start(
         workspace_id,
         profile,
         policy_version,
-        None,  # approval_id — spike
+        approval_id,
         run_id,
         args_json,
         # ok / error / status — set on finish

@@ -48,6 +48,12 @@ ERR_DENIED_BY_RULE = "denied_by_rule"
 ERR_QUEUE_TIMEOUT = "queue_timeout"
 ERR_TIMED_OUT = "timed_out"
 ERR_NO_PRESET = "no_preset"
+ERR_UNKNOWN_PRESET = "unknown_preset"
+ERR_USE_START_DEV_SERVER = "use_start_dev_server"
+ERR_MANAGED_PROCESS_NOT_FOUND = "managed_process_not_found"
+ERR_PORT_NOT_FOUND = "port_not_found"
+ERR_NOT_EXPOSED = "not_exposed"
+ERR_SERVER_SHUTTING_DOWN = "server_shutting_down"
 
 STANDARD_ERROR_CODES: tuple[str, ...] = (
     ERR_INTERNAL_ERROR,
@@ -66,6 +72,12 @@ STANDARD_ERROR_CODES: tuple[str, ...] = (
     ERR_QUEUE_TIMEOUT,
     ERR_TIMED_OUT,
     ERR_NO_PRESET,
+    ERR_UNKNOWN_PRESET,
+    ERR_USE_START_DEV_SERVER,
+    ERR_MANAGED_PROCESS_NOT_FOUND,
+    ERR_PORT_NOT_FOUND,
+    ERR_NOT_EXPOSED,
+    ERR_SERVER_SHUTTING_DOWN,
 )
 
 

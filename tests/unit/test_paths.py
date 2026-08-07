@@ -53,7 +53,7 @@ def test_settings_missing_file_returns_defaults(
     loaded = settings.load_settings()
     assert loaded == defaults.get_defaults()
     # Frozen defaults: every section must be present.
-    assert set(loaded.keys()) == {"version", "server", "security", "workspaces", "audit"}
+    assert set(loaded.keys()) == {"version", "server", "security", "workspaces", "audit", "process"}
 
 
 def test_settings_merge_preserves_defaults(

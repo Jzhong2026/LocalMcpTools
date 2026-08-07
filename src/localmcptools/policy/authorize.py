@@ -16,6 +16,7 @@ class Decision(StrEnum):
 _READ_ONLY_PREFIXES = ("environment.", "output.", "fs.")
 _OBSERVE_WORKSPACE_TOOLS = {
     "workspace.register", "workspace.list", "workspace.inspect", "workspace.search_text", "workspace.git_status",
+    "process.get_status", "process.list_managed", "process.list_listening_ports", "process.find_by_port",
 }
 _WORKSPACE_EXEC_TOOLS = {"shell.run_command", "workspace.run_test", "workspace.build", "workspace.lint"}
 _MANAGED_PROCESS_TOOLS = {"process.start_dev_server", "process.stop_managed"}

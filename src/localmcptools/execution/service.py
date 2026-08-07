@@ -29,6 +29,7 @@ import inspect
 import json
 import logging
 import os
+import threading
 import time
 import uuid
 from collections.abc import Callable, Sequence
@@ -142,6 +143,9 @@ class ToolExecutionService:
         self._policy_version = policy_version
         self._tools: dict[str, _Registration] = {}
         self._execution_gate = ConcurrencyGate()
+        self._lifecycle = threading.Condition()
+        self._accepting = True
+        self._active_calls = 0
 
     # -- registration ----------------------------------------------------
 
@@ -260,6 +264,44 @@ class ToolExecutionService:
         registration: _Registration,
         args: dict[str, Any],
     ) -> dict[str, Any]:
+        """Track in-flight work and fail closed once shutdown begins."""
+        with self._lifecycle:
+            if not self._accepting:
+                meta = ToolMeta(
+                    tool=registration.tool, duration_ms=0,
+                    audit_id=str(uuid.uuid4()), run_id=str(uuid.uuid4()),
+                )
+                return ToolResponse.error_response(
+                    code="server_shutting_down",
+                    message="the MCP server is shutting down",
+                    meta=meta,
+                    suggestion="retry after the server restarts",
+                ).model_dump()
+            self._active_calls += 1
+        try:
+            return self._invoke_core(registration, args)
+        finally:
+            with self._lifecycle:
+                self._active_calls -= 1
+                self._lifecycle.notify_all()
+
+    def begin_shutdown(self, grace_seconds: float = 5.0) -> bool:
+        """Reject new work and wait within the configured grace period."""
+        deadline = time.monotonic() + max(0.0, grace_seconds)
+        with self._lifecycle:
+            self._accepting = False
+            while self._active_calls:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self._lifecycle.wait(timeout=remaining)
+            return True
+
+    def _invoke_core(
+        self,
+        registration: _Registration,
+        args: dict[str, Any],
+    ) -> dict[str, Any]:
         """Run ``registration.logic`` and wrap the result.
 
         Always writes both ``record_start`` and ``record_finish`` audit
@@ -291,6 +333,8 @@ class ToolExecutionService:
         # chokepoint only forwards strings that look like UUIDs so
         # we don't poison the audit row with arbitrary text.
         workspace_id = _extract_workspace_id(args)
+        supplied_approval_id = args.get("approval_id")
+        approval_id = supplied_approval_id if isinstance(supplied_approval_id, str) else None
 
         audit.record_start(
             call_id=call_id,
@@ -302,6 +346,7 @@ class ToolExecutionService:
             agent=None,  # populated in change-3 when agent self-advertises
             client_instance=registration.default_client_instance,
             workspace_id=workspace_id or registration.default_workspace_id,
+            approval_id=approval_id,
             pid=os.getpid(),
             path=self._audit_path,
         )
@@ -315,6 +360,8 @@ class ToolExecutionService:
             # happens *before* any business work but after we already
             # inserted the audit row, so we still need to update it.
             envelope = raised.response
+            error_next_actions = list(envelope.meta.next_actions)
+            error_output_handle = envelope.meta.output_handle
             duration_ms = int((time.monotonic() - started) * 1000)
             evidence_handle_err: str | None = envelope.meta.evidence_handle or None
             envelope.meta = _meta(
@@ -323,6 +370,8 @@ class ToolExecutionService:
                 evidence_handle=evidence_handle_err,
                 extra=registration.extra_meta,
             )
+            envelope.meta.next_actions = error_next_actions
+            envelope.meta.output_handle = error_output_handle
             envelope.meta.audit_id = call_id
             envelope.meta.run_id = run_id
             envelope.meta.tool = registration.tool
@@ -337,6 +386,9 @@ class ToolExecutionService:
                 error_message=envelope.error.message if envelope.error else None,
                 duration_ms=duration_ms,
                 log_path=handle,
+                blocked_by=envelope.error.blocked_by if envelope.error else None,
+                severity=envelope.error.severity if envelope.error else None,
+                approval_id=(envelope.error.approval_id if envelope.error else None) or approval_id,
                 path=self._audit_path,
             )
             return envelope_dict
@@ -349,6 +401,7 @@ class ToolExecutionService:
                 error_code="internal_error",
                 error_message=msg,
                 duration_ms=duration_ms,
+                approval_id=approval_id,
                 path=self._audit_path,
             )
             meta = _meta(
@@ -410,6 +463,7 @@ class ToolExecutionService:
             error_message=(envelope_dict["error"] or {}).get("message"),
             duration_ms=duration_ms,
             log_path=handle,
+            approval_id=approval_id,
             path=self._audit_path,
         )
         return envelope_dict

@@ -11,6 +11,6 @@ The single audit + envelope chokepoint is in
 
 from __future__ import annotations
 
-from . import environment, fs, output, workspace
+from . import environment, fs, output, process, workspace
 
-__all__ = ["environment", "fs", "output", "workspace"]
+__all__ = ["environment", "fs", "output", "process", "workspace"]

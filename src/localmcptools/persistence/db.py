@@ -136,7 +136,31 @@ CREATE TABLE IF NOT EXISTS rule_hit_stats (
 );
 """
 
-CURRENT_SCHEMA_VERSION = 3
+BACKGROUND_PROCESSES_SCHEMA_V4 = """
+CREATE TABLE IF NOT EXISTS background_processes (
+    id                  TEXT PRIMARY KEY,
+    workspace_id        TEXT NOT NULL,
+    preset              TEXT NOT NULL,
+    command             TEXT NOT NULL,
+    cwd                 TEXT NOT NULL,
+    pid                 INTEGER NOT NULL,
+    log_handle          TEXT NOT NULL,
+    port                INTEGER,
+    started_at          INTEGER NOT NULL,
+    persistent          INTEGER NOT NULL DEFAULT 0,
+    status              TEXT NOT NULL,
+    exit_code           INTEGER,
+    finished_at         INTEGER
+);
+"""
+
+BACKGROUND_PROCESSES_INDEXES_V4 = (
+    "CREATE INDEX IF NOT EXISTS idx_background_started ON background_processes(started_at DESC);",
+    "CREATE INDEX IF NOT EXISTS idx_background_workspace ON background_processes(workspace_id);",
+    "CREATE INDEX IF NOT EXISTS idx_background_pid ON background_processes(pid);",
+)
+
+CURRENT_SCHEMA_VERSION = 4
 
 
 # --- Connection factory ---------------------------------------------------
@@ -230,6 +254,21 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute(RULE_HIT_STATS_SCHEMA_V3)
         _write_schema_version(conn, 3)
         current = 3
+
+    if current < 4:
+        _log.info("applying schema migration -> v4 (managed processes + streaming artifacts)")
+        conn.execute(BACKGROUND_PROCESSES_SCHEMA_V4)
+        for ddl in BACKGROUND_PROCESSES_INDEXES_V4:
+            conn.execute(ddl)
+        artifact_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(artifacts)").fetchall()
+        }
+        if "sealed" not in artifact_columns:
+            conn.execute(
+                "ALTER TABLE artifacts ADD COLUMN sealed INTEGER NOT NULL DEFAULT 1"
+            )
+        _write_schema_version(conn, 4)
+        current = 4
 
     if current != CURRENT_SCHEMA_VERSION:
         raise RuntimeError(

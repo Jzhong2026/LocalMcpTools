@@ -61,6 +61,14 @@ def test_invoke_meta_has_audit_and_run_ids(fresh_db: Path) -> None:
     assert meta["tool"] == "t.ids"
 
 
+def test_shutdown_rejects_new_tool_calls(fresh_db: Path) -> None:
+    service = ToolExecutionService(audit_path=fresh_db)
+    wrapper = service.register("t.noop", _noop)
+    assert service.begin_shutdown(grace_seconds=0.1) is True
+    envelope = wrapper()
+    assert envelope["error"]["code"] == "server_shutting_down"
+
+
 def test_register_auto_detects_dict_param(tmp_path: Path) -> None:
     service = ToolExecutionService()
     # No explicit param_names — auto-detect must recognise a single

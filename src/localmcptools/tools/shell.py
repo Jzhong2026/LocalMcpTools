@@ -23,6 +23,7 @@ from ..policy.approval import (
 from ..policy.authorize import Decision, check
 from ..policy.digest import digest_for
 from ..policy.profile import current
+from ..process.presets import suggest_for_command
 from ..safety.redact import redact
 from ..safety.rules import RuleEngine, record_hit
 from ..workspaces.registry import WorkspaceNotRegistered, resolve
@@ -46,6 +47,15 @@ def shell_run_command(args: dict[str, Any]) -> ToolResponse:
     capability = f"{profile.value}:shell.run_command"
     if check(profile, capability) is Decision.DENY:
         fail(code="insufficient_capability", message="workspace profile cannot run controlled shell commands", tool="shell.run_command", audit_id="pending", run_id="pending", workspace_id=workspace.id, suggestion="an operator must grant workspace_exec through the approval authority")
+
+    try:
+        timeout_ms = _timeout_ms(args.get("timeout_ms"))
+    except ValueError as exc:
+        fail(code="invalid_args", message=str(exc), tool="shell.run_command", audit_id="pending", run_id="pending", workspace_id=workspace.id)
+    threshold = int(load_settings().get("process", {}).get("long_running_threshold_ms", 60_000))
+    if timeout_ms >= threshold:
+        preset = suggest_for_command(command)
+        fail(code="use_start_dev_server", message="long-running commands must use a managed process preset", tool="shell.run_command", audit_id="pending", run_id="pending", workspace_id=workspace.id, suggestion=f"use preset {preset}", next_actions=[f"call process.start_dev_server with preset {preset}"])
 
     # Rules run before consuming the approval so even a valid approval cannot
     # be spent on an operation the safety layer rejects.
@@ -73,13 +83,12 @@ def shell_run_command(args: dict[str, Any]) -> ToolResponse:
         fail(code="approval_required", message="approval is still pending", tool="shell.run_command", audit_id="pending", run_id="pending", workspace_id=workspace.id, approval_id=approval_id)
 
     try:
-        timeout_ms = _timeout_ms(args.get("timeout_ms"))
         env, ignored_env = _filtered_env(workspace.id, args.get("env"))
     except ValueError as exc:
         fail(code="invalid_args", message=str(exc), tool="shell.run_command", audit_id="pending", run_id="pending", workspace_id=workspace.id)
     powershell = shutil.which("powershell") or shutil.which("pwsh") or "powershell.exe"
     try:
-        result = asyncio.run(run([powershell, *build_powershell_args(command)], cwd=workspace.canonical_root, env=env, timeout_ms=timeout_ms, gate=current_gate()))
+        result = asyncio.run(run([powershell, *build_powershell_args(command)], cwd=workspace.canonical_root, env=env, timeout_ms=timeout_ms, gate=current_gate(), reject_long_running=True))
     except QueueTimeout:
         fail(code="queue_timeout", message="execution queue timeout", tool="shell.run_command", audit_id="pending", run_id="pending", workspace_id=workspace.id)
     redacted_output, _ = redact(result.output)
@@ -92,7 +101,7 @@ def shell_run_command(args: dict[str, Any]) -> ToolResponse:
 
 def _timeout_ms(value: Any) -> int:
     if value is None:
-        return 120_000
+        return 30_000
     if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 3_600_000:
         raise ValueError("timeout_ms must be an integer between 1 and 3600000")
     return cast(int, value)

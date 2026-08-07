@@ -34,6 +34,12 @@ EXPECTED_TOOLS = {
     "output.tail",
     "output.read_range",
     "output.search",
+    "process.start_dev_server",
+    "process.get_status",
+    "process.list_managed",
+    "process.stop_managed",
+    "process.list_listening_ports",
+    "process.find_by_port",
 }
 
 
@@ -78,6 +84,7 @@ async def test_tools_listed(
     assert EXPECTED_TOOLS.issubset(names), (
         f"missing tools: {EXPECTED_TOOLS - names}"
     )
+    assert "process.kill" not in names
 
 
 # --- environment.get ------------------------------------------------------

@@ -40,6 +40,12 @@ DEFAULTS: dict[str, Any] = {
         "retention_days": 7,
         "cleanup_interval_hours": 6,
     },
+    "process": {
+        "managed_max_concurrent": 4,
+        "shutdown_grace_seconds": 5,
+        "reconcile_interval_seconds": 30,
+        "long_running_threshold_ms": 60_000,
+    },
 }
 
 

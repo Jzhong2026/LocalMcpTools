@@ -85,6 +85,7 @@ class ArtifactRecord:
     created_at: int  # unix ms
     expires_at: int | None
     sensitive: bool
+    sealed: bool = True
 
 
 # --- Path helpers ---------------------------------------------------------
@@ -238,6 +239,52 @@ def write(
     return handle
 
 
+def create_stream(*, call_id: str | None = None, sensitive: bool = False) -> str:
+    """Create an empty, appendable artifact and return its handle."""
+    handle = write("", call_id=call_id, sensitive=sensitive)
+    with get_connection() as conn:
+        conn.execute("UPDATE artifacts SET sealed = 0 WHERE handle = ?", (handle,))
+    return handle
+
+
+def append(handle: str, content: str | bytes) -> None:
+    """Append redacted content to an unsealed streaming artifact."""
+    rec = lookup(handle)
+    if rec.sealed:
+        raise RedactionFailed(f"artifact is sealed: {handle!r}")
+    text = content.decode("utf-8", errors="replace") if isinstance(content, bytes) else content
+    safe, _ = redact(text)
+    payload = safe.encode("utf-8")
+    target = Path(rec.path)
+    try:
+        with target.open("ab") as stream:
+            stream.write(payload)
+            stream.flush()
+    except OSError as exc:
+        raise RedactionFailed(f"could not append artifact {handle!r}: {exc}") from exc
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE artifacts SET bytes_total = bytes_total + ?, "
+            "line_count = line_count + ? WHERE handle = ? AND sealed = 0",
+            (len(payload), payload.count(b"\n"), handle),
+        )
+
+
+def seal(handle: str) -> None:
+    """Finalize a streaming artifact and freeze its final metadata."""
+    rec = lookup(handle)
+    target = Path(rec.path)
+    if not target.exists():
+        raise ArtifactNotFound(f"artifact file vanished: {rec.path!r}")
+    payload = target.read_bytes()
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE artifacts SET bytes_total = ?, line_count = ?, sealed = 1 "
+            "WHERE handle = ?",
+            (len(payload), payload.count(b"\n"), handle),
+        )
+
+
 # --- Windows ACL ----------------------------------------------------------
 
 
@@ -296,7 +343,7 @@ def lookup(handle: str, conn: sqlite3.Connection | None = None) -> ArtifactRecor
     def _do(c: sqlite3.Connection) -> ArtifactRecord:
         row = c.execute(
             "SELECT handle, path, call_id, bytes_total, line_count, "
-            "created_at, expires_at, sensitive "
+            "created_at, expires_at, sensitive, sealed "
             "FROM artifacts WHERE handle = ?",
             (handle,),
         ).fetchone()
@@ -311,6 +358,7 @@ def lookup(handle: str, conn: sqlite3.Connection | None = None) -> ArtifactRecor
             created_at=row["created_at"],
             expires_at=row["expires_at"],
             sensitive=bool(row["sensitive"]),
+            sealed=bool(row["sealed"]),
         )
 
     if conn is None:
@@ -366,7 +414,7 @@ def _read_text(rec: ArtifactRecord, *, max_bytes: int | None = None) -> list[str
     # Strip a trailing partial line so callers get clean \n splits.
     if text.endswith("\n"):
         text = text[:-1]
-    return text.split("\n")
+    return [line.rstrip("\r") for line in text.split("\n")]
 
 
 def tail(handle: str, n: int = 200, *, conn: sqlite3.Connection | None = None) -> list[str]:
@@ -403,7 +451,7 @@ def tail(handle: str, n: int = 200, *, conn: sqlite3.Connection | None = None) -
     text = buf.decode("utf-8", errors="replace")
     if text.endswith("\n"):
         text = text[:-1]
-    lines = text.split("\n")
+    lines = [line.rstrip("\r") for line in text.split("\n")]
     # If we read everything and got fewer than n lines, return them all.
     if pos == 0:
         return lines[-n:] if len(lines) > n else lines
@@ -450,7 +498,7 @@ def _read_range_streaming(rec: ArtifactRecord, start_line: int, end_line: int) -
                 # Strip trailing newline for consistency with ``tail``.
                 if line.endswith("\n"):
                     line = line[:-1]
-                out.append(line)
+                out.append(line.rstrip("\r"))
     return out
 
 
@@ -516,11 +564,14 @@ __all__ = [
     "INLINE_THRESHOLD_BYTES",
     "RedactionFailed",
     "build_handle",
+    "append",
+    "create_stream",
     "exists",
     "lookup",
     "parse_handle",
     "read_range",
     "search",
+    "seal",
     "should_artifact_size",
     "tail",
     "write",
