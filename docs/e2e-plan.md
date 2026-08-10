@@ -441,10 +441,10 @@ angular-ui-foundation                 10        6         0
 bootstrap-mcp-server                   2        0         4
 core-shell-and-audit                   6        0         1
 extended-tools-and-packaging           1        7         7
-policy-and-safety                      3        0         2
+policy-and-safety                     13        0         2
 ui-automation-and-ocr                  3       13         5
 ------------------------------------------------------------
-TOTAL                                 25       26        19
+TOTAL                                 35       26        19
 ```
 
 The framework reports these numbers on every `pytest -m e2e` run

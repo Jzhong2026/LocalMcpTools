@@ -250,6 +250,107 @@ REGISTRY: tuple[DoDEntry, ...] = (
             "test_every_tool_lands_in_audit_db[shell.run_command]"
         ),
     ),
+    # --- Built-in deny rules: every rule has a positive e2e proof ---
+    DoDEntry(
+        change="policy-and-safety",
+        section="2.4",
+        item="`block-format-volume` rule fires on dangerous Format-Volume / format / diskpart",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_05_policy_enforcement.py::"
+            "test_engine_matches_dangerous_command[block-format-volume]"
+        ),
+    ),
+    DoDEntry(
+        change="policy-and-safety",
+        section="2.4",
+        item="`block-disk-wipe` rule fires on cipher /w + dd-of=/dev",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_05_policy_enforcement.py::"
+            "test_engine_matches_dangerous_command[block-disk-wipe]"
+        ),
+    ),
+    DoDEntry(
+        change="policy-and-safety",
+        section="2.4",
+        item="`block-firewall-reset` rule fires on netsh advfirewall reset",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_05_policy_enforcement.py::"
+            "test_engine_matches_dangerous_command[block-firewall-reset]"
+        ),
+    ),
+    DoDEntry(
+        change="policy-and-safety",
+        section="2.4",
+        item="`block-boot-loader` rule fires on bcdedit / bootrec / bcdboot",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_05_policy_enforcement.py::"
+            "test_engine_matches_dangerous_command[block-boot-loader]"
+        ),
+    ),
+    DoDEntry(
+        change="policy-and-safety",
+        section="2.4",
+        item="`block-kill-protected` rule fires on taskkill of csrss/lsass/smss/wininit",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_05_policy_enforcement.py::"
+            "test_engine_matches_dangerous_command[block-kill-protected]"
+        ),
+    ),
+    DoDEntry(
+        change="policy-and-safety",
+        section="2.4",
+        item="`block-privilege-escalation` rule fires on net localgroup administrators /add",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_05_policy_enforcement.py::"
+            "test_engine_matches_dangerous_command[block-privilege-escalation]"
+        ),
+    ),
+    DoDEntry(
+        change="policy-and-safety",
+        section="2.4",
+        item="`block-rdp-enable` rule fires on fDenyTSConnections=0",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_05_policy_enforcement.py::"
+            "test_engine_matches_dangerous_command[block-rdp-enable]"
+        ),
+    ),
+    DoDEntry(
+        change="policy-and-safety",
+        section="2.4",
+        item="`block-registry-delete` rule fires on Remove-Item HKLM: + reg delete HKLM",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_05_policy_enforcement.py::"
+            "test_engine_matches_dangerous_command[block-registry-delete]"
+        ),
+    ),
+    DoDEntry(
+        change="policy-and-safety",
+        section="2.4",
+        item="`block-remote-download-exec` rule fires on IEX + DownloadString",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_05_policy_enforcement.py::"
+            "test_engine_matches_dangerous_command[block-remote-download-exec]"
+        ),
+    ),
+    DoDEntry(
+        change="policy-and-safety",
+        section="2.4",
+        item="`block-system-rm` rule fires on Remove-Item in C:\\Windows + /Windows",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_05_policy_enforcement.py::"
+            "test_engine_matches_dangerous_command[block-system-rm]"
+        ),
+    ),
     # --- managed-process-and-ports (Phase 3) — DONE, no unchecked items ---
     # --- angular-ui-foundation (Phase 4) ---
     DoDEntry(
