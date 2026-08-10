@@ -232,6 +232,36 @@ REGISTRY: tuple[DoDEntry, ...] = (
             "test_output_tail_idempotent"
         ),
     ),
+    DoDEntry(
+        change="core-shell-and-audit",
+        section="1.10",
+        item="Full chain: register → inspect → search_text → fs.read_range",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_03_workspace_lifecycle.py::"
+            "test_full_lifecycle_register_inspect_search_read_tail"
+        ),
+    ),
+    DoDEntry(
+        change="core-shell-and-audit",
+        section="1.10",
+        item="Path-escape attempt returns invalid_path (security boundary)",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_03_workspace_lifecycle.py::"
+            "test_path_escape_attempt_returns_invalid_path"
+        ),
+    ),
+    DoDEntry(
+        change="core-shell-and-audit",
+        section="1.10",
+        item="Cross-session run_id distinguishes sessions",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_03_workspace_lifecycle.py::"
+            "test_cross_call_run_id_distinguishes_sessions"
+        ),
+    ),
     # --- policy-and-safety (Phase 2) ---
     DoDEntry(
         change="policy-and-safety",
