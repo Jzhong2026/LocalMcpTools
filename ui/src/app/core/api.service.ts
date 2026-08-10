@@ -4,11 +4,17 @@ import { firstValueFrom } from 'rxjs';
 
 import {
   AuditList,
+  AuthorizedWindow,
   BackgroundSummary,
   McpConfigSnippet,
+  OcrBlock,
+  OcrRegion,
   RulesList,
   RuleSummary,
   StatusPayload,
+  UiFindMatch,
+  UiTree,
+  WindowSummary,
 } from './models';
 
 /**
@@ -102,7 +108,92 @@ export class ApiService {
     );
   }
 
-  uiScreenshotWindow(body: { window_id: string }): Promise<unknown> {
-    return firstValueFrom(this.http.post('/api/ui/screenshot/window', body));
+  // --- UI automation + OCR helpers (change-6) ---------------------------
+
+  /** Fetch the raw ``/api/windows`` payload (avoids CSRF on GETs). */
+  async windowsList(): Promise<{ windows: WindowSummary[] }> {
+    const r = await fetch('/api/windows');
+    return (await r.json()) as { windows: WindowSummary[] };
+  }
+
+  windowsAuthorize(body: {
+    hwnd: number;
+    title: string;
+    process: string;
+    pid: number;
+    ttl_ms?: number;
+  }): Promise<{ window: AuthorizedWindow }> {
+    return firstValueFrom(
+      this.http.post<{ window: AuthorizedWindow }>('/api/windows/authorize', body),
+    );
+  }
+
+  windowsRevoke(windowId: string): Promise<{ revoked: boolean }> {
+    return firstValueFrom(
+      this.http.post<{ revoked: boolean }>(`/api/windows/${windowId}/revoke`, {}),
+    );
+  }
+
+  uiGetTree(windowId: string, depth: number = 4): Promise<UiTree> {
+    return firstValueFrom(
+      this.http.post<UiTree>('/api/ui/get_ui_tree', { window_id: windowId, depth }),
+    );
+  }
+
+  uiFindElement(body: {
+    window_id: string;
+    text?: string;
+    automationId?: string;
+    controlType?: string;
+    name?: string;
+    max_results?: number;
+  }): Promise<{ matches: UiFindMatch[] }> {
+    return firstValueFrom(
+      this.http.post<{ matches: UiFindMatch[] }>('/api/ui/find_element', body),
+    );
+  }
+
+  uiScreenshotWindow(windowId: string): Promise<{
+    handle?: string;
+    error?: { code: string; message: string };
+  }> {
+    return firstValueFrom(
+      this.http.post<{ handle?: string; error?: { code: string; message: string } }>(
+        '/api/ui/screenshot_window',
+        { window_id: windowId },
+      ),
+    );
+  }
+
+  ocrRegion(body: {
+    window_id?: string;
+    screenshot_handle?: string;
+  }): Promise<OcrRegion> {
+    return firstValueFrom(this.http.post<OcrRegion>('/api/ocr/ocr_region', body));
+  }
+
+  ocrAssertText(body: {
+    window_id?: string;
+    screenshot_handle?: string;
+    expected: string;
+    match?: string;
+  }): Promise<{
+    passed: boolean;
+    actual_text: string | null;
+    matches: OcrBlock[];
+    min_confidence: number | null;
+    evidence_handle: string | null;
+    uncertain: boolean;
+  }> {
+    return firstValueFrom(
+      this.http.post<{
+        passed: boolean;
+        actual_text: string | null;
+        matches: OcrBlock[];
+        min_confidence: number | null;
+        evidence_handle: string | null;
+        uncertain: boolean;
+      }>('/api/ocr/assert_text', body),
+    );
   }
 }

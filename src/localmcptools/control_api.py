@@ -427,6 +427,88 @@ async def windows_revoke(window_id: str) -> dict[str, Any]:
     return {"revoked": revoke(window_id=window_id)}
 
 
+# --- /ui/* proxies --------------------------------------------------------
+#
+# The control plane proxies a small set of MCP tool bodies so the SPA
+# can drive UI automation without speaking MCP. Every endpoint passes
+# its payload through the corresponding tool body; the chokepoint
+# records an audit row on the way through, exactly like a normal MCP
+# call would.
+
+
+def _proxy_tool(tool: str, args: dict[str, Any]) -> Any:
+    """Invoke a tool body by name through the chokepoint and return its result.
+
+    The control-plane proxy goes through :class:`ToolExecutionService.invoke`
+    so the audit row is recorded the same way as a real MCP call would.
+    This keeps audit + envelope + concurrency gating identical across
+    transports.
+
+    Imports are deferred to avoid pulling the UI stack at control_api
+    import time (the /api/status path stays clean).
+    """
+    from .execution.service import ToolExecutionService
+
+    service = ToolExecutionService()
+    try:
+        registration = service.get_registration(tool)
+    except KeyError:
+        # The control_app test fixture builds an empty service; the
+        # real bootstrap registers every tool body. A missing tool is
+        # a 501 here so the SPA renders an actionable error.
+        raise HTTPException(
+            status_code=501,
+            detail={"code": "not_implemented", "message": f"unknown tool {tool!r}"},
+        )
+    if registration is None:
+        raise HTTPException(
+            status_code=501,
+            detail={"code": "not_implemented", "message": f"unknown tool {tool!r}"},
+        )
+    try:
+        result = service.invoke(registration, args)
+    except Exception as exc:  # noqa: BLE001 — surface as 500
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "internal_error", "message": str(exc)},
+        )
+    if isinstance(result, dict) and result.get("ok") is False and result.get("error"):
+        # Tool-level errors become 4xx so the SPA can render the error
+        # envelope verbatim. The audit row already records the failure.
+        code = str(result["error"].get("code") or "")
+        if code in {"invalid_args", "invalid_path", "source_not_allowed"}:
+            raise HTTPException(status_code=400, detail=result["error"])
+        if code in {"window_not_authorized", "workspace_not_registered"}:
+            raise HTTPException(status_code=403, detail=result["error"])
+        return result  # 200 with the failure envelope (preserves shape)
+    return result
+
+
+@router.post("/ui/get_ui_tree")
+async def ui_get_tree(body: dict[str, Any]) -> Any:
+    return _proxy_tool("ui.get_ui_tree", body)
+
+
+@router.post("/ui/find_element")
+async def ui_find_element(body: dict[str, Any]) -> Any:
+    return _proxy_tool("ui.find_element", body)
+
+
+@router.post("/ui/screenshot_window")
+async def ui_screenshot_window(body: dict[str, Any]) -> Any:
+    return _proxy_tool("ui.screenshot_window", body)
+
+
+@router.post("/ocr/ocr_region")
+async def ocr_ocr_region(body: dict[str, Any]) -> Any:
+    return _proxy_tool("ocr.ocr_region", body)
+
+
+@router.post("/ocr/assert_text")
+async def ocr_assert_text(body: dict[str, Any]) -> Any:
+    return _proxy_tool("ocr.assert_text", body)
+
+
 # --- /mcp-config-snippet --------------------------------------------------
 
 

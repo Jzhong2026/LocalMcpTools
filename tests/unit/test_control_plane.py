@@ -275,6 +275,34 @@ async def test_shutdown_returns_ok_in_standalone_mode(control_app: FastAPI) -> N
     assert r.json()["ok"] is True
 
 
+# --- /ui/* / /ocr/* proxy helpers -----------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_proxy_tool_unknown_tool_returns_501(control_app: FastAPI) -> None:
+    """The proxy returns 501 for an unregistered tool name."""
+    async with await _csrf_client(control_app) as client:
+        r = await client.post(
+            "/api/ui/get_ui_tree",
+            json={"window_id": "no-such-window"},
+            headers={"X-LMCP-CSRF": "test-token"},
+        )
+    # Unknown tool → 501; the SPA renders the detail as an error.
+    assert r.status_code == 501
+    body = r.json()
+    assert body["detail"]["code"] == "not_implemented"
+
+
+async def _csrf_client(app: FastAPI) -> httpx.AsyncClient:
+    """Client with both Origin + CSRF cookie + header set up."""
+    client = _origin_client(app)
+    client.cookies.set("lmcp_csrf", "test-token")
+    return client
+
+
+# --- save_settings helper -------------------------------------------------
+
+
 # --- save_settings helper -------------------------------------------------
 
 

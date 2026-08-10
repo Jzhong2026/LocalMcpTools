@@ -73,3 +73,78 @@ export interface McpConfigSnippet {
   copilot: { location: string; content: Record<string, unknown> };
   http: { location: string; content: Record<string, unknown> };
 }
+
+// --- UI automation + OCR wire shapes (change-6) ---------------------------
+
+export interface WindowSummary {
+  process: string;
+  pid: number;
+  title: string;
+  hwnd: number;
+}
+
+export interface AuthorizedWindow {
+  id: string;
+  process: string;
+  pid: number;
+  title: string;
+  hwnd: number;
+  issued_at: number;
+  expires_at: number;
+  revoked: boolean;
+}
+
+export interface UiBoundingBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface UiNode {
+  name: string;
+  automationId: string;
+  controlType: string;
+  boundingBox: UiBoundingBox;
+  isEnabled: boolean;
+  isVisible: boolean;
+  children?: UiNode[];
+}
+
+export interface UiTree {
+  nodes: UiNode[];
+  truncated: boolean;
+  handle: string | null;
+  total: number;
+  summary: UiNode[];
+}
+
+export interface UiTreeError {
+  error: string;
+  message?: string;
+}
+
+export interface UiFindMatch {
+  name: string;
+  automationId: string;
+  controlType: string;
+  boundingBox: UiBoundingBox;
+  score: number;
+}
+
+export interface OcrBlock {
+  text: string;
+  confidence: number;
+  bounding_box: UiBoundingBox;
+}
+
+export interface OcrRegion {
+  blocks: OcrBlock[];
+  full_text: string;
+  uncertain: boolean;
+  source_handle: string | null;
+}
+
+export interface OcrRegionError {
+  error: { code: string; message: string };
+}

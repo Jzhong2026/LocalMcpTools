@@ -94,8 +94,8 @@
 
 - [x] `/ui/automation` page
 - [x] Window list widget (filtered; "Authorize" button)
-- [ ] UI tree viewer widget (collapsible nodes, click-to-find) *(TODO — wire to ui.get_ui_tree)*
-- [ ] OCR preview widget (shows OCR result overlay on a screenshot handle) *(TODO — wire to ocr.ocr_region)*
+- [x] UI tree viewer widget (collapsible nodes, click-to-find) *(wired via /api/ui/get_ui_tree + /api/ui/find_element proxies)*
+- [x] OCR preview widget (shows OCR result overlay on a screenshot handle) *(wired via /api/ocr/ocr_region + /api/ocr/assert_text proxies)*
 - [x] Revoke button per window
 - [x] CSRF + auth middleware applied (inherited from change-5)
 

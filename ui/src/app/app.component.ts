@@ -28,6 +28,7 @@ import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
     <nav class="lmcp-nav">
       <a routerLink="/dashboard" routerLinkActive="active">Dashboard</a>
       <a routerLink="/audit" routerLinkActive="active">Audit</a>
+      <a routerLink="/automation" routerLinkActive="active">Automation</a>
       <a routerLink="/settings" routerLinkActive="active">Settings</a>
       <a routerLink="/rules" routerLinkActive="active">Rules</a>
       <a routerLink="/mcp-config" routerLinkActive="active">MCP Config</a>
