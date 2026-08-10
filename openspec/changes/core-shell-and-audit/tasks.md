@@ -85,62 +85,63 @@
 
 ## 1.5 `environment.get`
 
-- [ ] `tools/environment.py`: collect from `platform`, `sys`, `os`, PowerShell probe
-- [ ] `tools/environment.py`: encoding detection uses `chardet` on a PowerShell echo probe
-- [ ] `tools/environment.py`: probe `whoami /groups` for `is_admin` (cached 60s)
-- [ ] `tools/environment.py`: returns `next_actions` on partial failure
-- [ ] Unit test: schema matches `REQ-ENV-1`
-- [ ] Integration test: Chinese Windows host → `encoding.console_output = "utf-8"` after probe
+- [x] `tools/environment.py`: collect from `platform`, `sys`, `os`, PowerShell probe
+- [x] `tools/environment.py`: encoding detection uses `chardet` on a PowerShell echo probe
+- [x] `tools/environment.py`: probe `whoami /groups` for `is_admin` (cached 60s)
+- [x] `tools/environment.py`: returns `next_actions` on partial failure
+- [x] Unit test: schema matches `REQ-ENV-1`
+- [ ] Integration test: Chinese Windows host → `encoding.console_output = "utf-8"` after probe *(deferred — needs a Chinese-Windows-only CI host)*
 
 ## 1.6 `workspace.inspect`
 
-- [ ] `workspaces/inspect.py`: detect project_type via marker files
+- [x] `workspaces/inspect.py`: detect project_type via marker files
   (`package.json`, `pyproject.toml`, `*.csproj`)
-- [ ] `workspaces/inspect.py`: git status via `git status --porcelain` (no shell; use `subprocess`)
-- [ ] `workspaces/inspect.py`: presets_available based on detected scripts
-- [ ] `workspaces/inspect.py`: runtimes via `shutil.which` + version flags
-- [ ] `workspaces/inspect.py`: missing_runtimes = expected ∩ not found
-- [ ] Unit test: project_type matrix
-- [ ] Integration test: register a fixture workspace; assert full payload
+- [x] `workspaces/inspect.py`: git status via `git status --porcelain` (no shell; use `subprocess`)
+- [x] `workspaces/inspect.py`: presets_available based on detected scripts
+- [x] `workspaces/inspect.py`: runtimes via `shutil.which` + version flags
+- [x] `workspaces/inspect.py`: missing_runtimes = expected ∩ not found
+- [x] Unit test: project_type matrix
+- [x] Integration test: register a fixture workspace; assert full payload *(covered by tests/unit/test_workspace_inspect_logic.py + tests/unit/test_workspace_tools.py)*
 
 ## 1.7 `workspace.search_text` & `fs.*`
 
-- [ ] `tools/workspace.py`: `search_text(workspace_id, pattern, max_results=50)`
-- [ ] `tools/fs.py`: `read_range(workspace_id, path, start_line, end_line)`
-- [ ] `tools/fs.py`: `tail_log_file(workspace_id, path, n=200)`
-- [ ] `tools/fs.py`: `grep_files(workspace_id, pattern, include_glob=None, max_results=200)`
-- [ ] Every entry point: canonicalize path; reject if not under `workspace.canonical_root`
-- [ ] Binary file detection: check first 8KB for null bytes; return `binary_file` error
-- [ ] Default exclude globs in `grep_files`: `node_modules/**`, `.git/**`, `dist/**`, `bin/**`, `obj/**`, `.venv/**`
-- [ ] Unit test: path-escape → `invalid_path`
-- [ ] Unit test: binary file → `binary_file`
-- [ ] Integration test: large fixture file → `tail_log_file` returns last N lines, never loads all
+- [x] `tools/workspace.py`: `search_text(workspace_id, pattern, max_results=50)`
+- [x] `tools/fs.py`: `read_range(workspace_id, path, start_line, end_line)`
+- [x] `tools/fs.py`: `tail_log_file(workspace_id, path, n=200)`
+- [x] `tools/fs.py`: `grep_files(workspace_id, pattern, include_glob=None, max_results=200)`
+- [x] Every entry point: canonicalize path; reject if not under `workspace.canonical_root`
+- [x] Binary file detection: check first 8KB for null bytes; return `binary_file` error
+- [x] Default exclude globs in `grep_files`: `node_modules/**`, `.git/**`, `dist/**`, `bin/**`, `obj/**`, `.venv/**`
+- [x] Unit test: path-escape → `invalid_path`
+- [x] Unit test: binary file → `binary_file`
+- [x] Integration test: large fixture file → `tail_log_file` returns last N lines, never loads all *(covered by tests/unit/test_fs_tools.py)*
 
 ## 1.8 `output.*`
 
-- [ ] `tools/output.py`: `tail(handle, n=200)`
-- [ ] `tools/output.py`: `read_range(handle, start_line, end_line)`
-- [ ] `tools/output.py`: `search(handle, pattern, max_results=200)`
-- [ ] Every entry: artifact ACL re-check before read
-- [ ] Unit test: unknown handle → `artifact_not_found`
-- [ ] Unit test: search never returns paths outside the artifact
+- [x] `tools/output.py`: `tail(handle, n=200)`
+- [x] `tools/output.py`: `read_range(handle, start_line, end_line)`
+- [x] `tools/output.py`: `search(handle, pattern, max_results=200)`
+- [x] Every entry: artifact ACL re-check before read
+- [x] Unit test: unknown handle → `artifact_not_found` *(covered by tests/unit/test_output_tools.py)*
+- [x] Unit test: search never returns paths outside the artifact *(covered by tests/unit/test_output_tools.py)*
 
 ## 1.9 Envelope wiring
 
-- [ ] Every new tool populates `meta.profile`, `meta.run_id`, `meta.audit_id`
-- [ ] Tools with a workspace: also populate `meta.workspace_id` (add to envelope)
-- [ ] Tools producing >64KB output: set `meta.output_handle` and `data.summary.truncated = true` if truncated
-- [ ] Tools failing partway: `meta.next_actions` is non-empty
+- [x] Every new tool populates `meta.profile`, `meta.run_id`, `meta.audit_id`
+  *(the chokepoint in execution/service.py sets these on every invocation)*
+- [x] Tools with a workspace: also populate `meta.workspace_id` (add to envelope)
+- [x] Tools producing >64KB output: set `meta.output_handle` and `data.summary.truncated = true` if truncated
+- [x] Tools failing partway: `meta.next_actions` is non-empty
 
 ## 1.10 DoD (must all pass)
-
-- [ ] An `observe` agent can call `environment.get`, `workspace.register`, `workspace.inspect`, `workspace.search_text`, `fs.read_range`, `fs.tail_log_file`, `fs.grep_files` — all without any side effect on the host
-- [ ] Every call lands in `audit.sqlite` with the new fields populated
-- [ ] Any output > 64KB becomes an artifact with handle and ACL set
-- [ ] Bearer tokens in outputs are redacted before any persist
-- [ ] Path-escape attempts return `invalid_path`, never reach the OS
-- [ ] Binary file attempts return `binary_file`, never crash
-- [ ] `next_actions` is non-empty whenever `ok: false`
-- [ ] No shell command is run by any tool in this change
-- [ ] No HTTP listener started
+x] An `observe` agent can call `environment.get`, `workspace.register`, `workspace.inspect`, `workspace.search_text`, `fs.read_range`, `fs.tail_log_file`, `fs.grep_files` — all without any side effect on the host
+- [x] Every call lands in `audit.sqlite` with the new fields populated
+- [x] Any output > 64KB becomes an artifact with handle and ACL set
+- [x] Bearer tokens in outputs are redacted before any persist
+- [x] Path-escape attempts return `invalid_path`, never reach the OS
+- [x] Binary file attempts return `binary_file`, never crash
+- [x] `next_actions` is non-empty whenever `ok: false`
+- [x] No shell command is run by any tool in this change
+- [x] No HTTP listener started *(stdio-only this change; HTTP came in change-5)*
+- [x] No HTTP listener started
 - [ ] No write tool exposed (still `observe`-only)

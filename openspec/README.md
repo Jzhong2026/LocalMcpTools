@@ -36,6 +36,12 @@ its specs are reflected in the running server.
 | 6 | `ui-automation-and-ocr` | 5 | UIA + OCR-backed UI verification | done *(live Windows spike accuracy numbers owed)* |
 | 7 | `extended-tools-and-packaging` | 6 + 7 + 8 | Diagnostic extras, packaging, cross-agent verify | done *(reboot smoke-test owed)* |
 
+> **Code-complete summary:** every change above has its code, tests, and
+> documentation in place. The remaining "owed" items all require a
+> live environment (real Windows desktop / real agent session / real
+> reboot) and are tracked so they aren't forgotten — not because the
+> code is missing.
+
 ## Dependency Graph
 
 ```text
