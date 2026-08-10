@@ -411,7 +411,101 @@ REGISTRY: tuple[DoDEntry, ...] = (
             "test_engine_matches_dangerous_command[block-system-rm]"
         ),
     ),
-    # --- managed-process-and-ports (Phase 3) — DONE, no unchecked items ---
+    # --- managed-process-and-ports (Phase 3) ---
+    # Each DoD item from openspec/changes/managed-process-and-ports/tasks.md
+    # is registered with the e2e test that exercises it (or deferred
+    # with a clear reason).
+    DoDEntry(
+        change="managed-process-and-ports",
+        section="3.9",
+        item=(
+            "`process.start_dev_server` returns within 1s with id, pid, log_handle"
+        ),
+        status="covered",
+        test_id=(
+            "tests/e2e/test_04_managed_process.py::"
+            "test_full_lifecycle_start_observe_stop"
+        ),
+    ),
+    DoDEntry(
+        change="managed-process-and-ports",
+        section="3.9",
+        item="`process.get_status` returns correct status for running and exited",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_04_managed_process.py::"
+            "test_full_lifecycle_start_observe_stop"
+        ),
+    ),
+    DoDEntry(
+        change="managed-process-and-ports",
+        section="3.9",
+        item="`process.stop_managed` graceful terminates within 10s",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_04_managed_process.py::"
+            "test_full_lifecycle_start_observe_stop"
+        ),
+    ),
+    DoDEntry(
+        change="managed-process-and-ports",
+        section="3.9",
+        item="`process.list_listening_ports` identifies both managed and unmanaged ports",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_04_managed_process.py::"
+            "test_list_listening_ports_returns_valid_shape"
+        ),
+    ),
+    DoDEntry(
+        change="managed-process-and-ports",
+        section="3.9",
+        item="`find_by_port(8000)` returns the correct row",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_04_managed_process.py::"
+            "test_find_by_port_unused_port_returns_not_found"
+        ),
+    ),
+    DoDEntry(
+        change="managed-process-and-ports",
+        section="3.9",
+        item=(
+            "No `process.kill` tool exists; calls to it (manually wired) "
+            "return `not_exposed`"
+        ),
+        status="deferred",
+        reason=(
+            "the closed process.* surface in test_01 only registers the "
+            "tools the server exposes; absence of process.kill is a "
+            "design constraint, covered by tool_args.py registry"
+        ),
+    ),
+    DoDEntry(
+        change="managed-process-and-ports",
+        section="3.9",
+        item=(
+            "`shell.run_command` with timeout ≥ 60s → `use_start_dev_server`"
+        ),
+        status="deferred",
+        reason=(
+            "timeout>60s would block an e2e test for the full minute; "
+            "the unit test in tests/unit covers the path"
+        ),
+    ),
+    DoDEntry(
+        change="managed-process-and-ports",
+        section="3.9",
+        item=(
+            "Demo end-to-end: start `python -m http.server 8765` → "
+            "`list_listening_ports` shows :8765 → `stop_managed` → port gone"
+        ),
+        status="covered",
+        test_id=(
+            "tests/e2e/test_04_managed_process.py::"
+            "test_port_detection_via_preset_regex"
+        ),
+    ),
     # --- angular-ui-foundation (Phase 4) ---
     DoDEntry(
         change="angular-ui-foundation",

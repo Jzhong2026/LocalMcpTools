@@ -5,8 +5,10 @@ A local Model Context Protocol (MCP) toolset for VS Code agents
 
 ## Status
 
-**Phases 0-6 (`ui-automation-and-ocr`) code-complete.** Live spike
-accuracy numbers + the cross-agent live hand-off check still owed.
+**Phases 0-6 (`ui-automation-and-ocr`) code-complete.** E2E test
+suite covers phases 1, 2, 3, 4, 5, 6, 7, 8, 9 (243 tests, ~4 min).
+Live spike accuracy numbers + the cross-agent live hand-off
+check still owed.
 
 What's shipped:
 
@@ -28,7 +30,8 @@ What's shipped:
   with the server.
 - **HTTP control plane**: `localmcptools start --http` boots a FastAPI app
   on `127.0.0.1:7890` (configurable) with Origin allowlist, CSRF
-  double-submit, bearer auth for `/mcp`, and 16 control endpoints
+  double-submit, bearer auth for `/mcp` (Streamable HTTP MCP transport,
+  same protocol as stdio), and 16 control endpoints
   (`/api/status`, `/api/audit`, `/api/rules`, `/api/backgrounds`,
   `/api/settings`, `/api/mcp-config-snippet`, `/api/windows/*`,
   `/api/shutdown`, ...).
@@ -44,11 +47,17 @@ What's shipped:
 - **Packaging**: `localmcptools install [--method scheduled_task|startup_folder]`
   registers a user-level (no admin) Windows scheduled task; `uninstall`
   removes it. Idempotent.
+- **E2E test suite** (`tests/e2e/`): 243 tests covering 7 of the 13 plan
+  phases — boot, tool surface (stdio + HTTP), HTTP control plane,
+  policy enforcement, artifact redaction, workspace lifecycle,
+  managed-process lifecycle, and concurrent clients. Run with
+  `pytest -m e2e`. See [`docs/e2e-plan.md`](docs/e2e-plan.md).
 
 What's still owed: live Windows OCR accuracy spike (provider ships but
 real numbers haven't been measured yet), the cross-agent live
-hand-off check for `workbuddy` / `minimax code`, and the Windows reboot
-smoke test for the scheduled task. See
+hand-off check for `workbuddy` / `minimax code`, the Windows reboot
+smoke test for the scheduled task, and e2e phases 10-13 (Angular UI
+playwright, UI automation, OCR, install/uninstall). See
 [`openspec/changes/`](openspec/changes/) for the contracts and
 [`docs/implementation-plan.md`](docs/implementation-plan.md) for the full
 roadmap.

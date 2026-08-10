@@ -417,22 +417,74 @@ on the critical path.
 | Phase | Status | Tests | Notes |
 |---|---|---|---|
 | 1. Fixtures + helpers + stdio boot | **done** | 8 | commit d4fe2f8 |
-| 15. DoD linkage framework | **done** | 10 | commit 53d1f89 |
-| 2. `test_01` (40 tools over stdio) | **done** | 90 | this commit |
-| 3. `test_07` (control plane) | **done** | 27 | this commit |
-| 4. `test_05` policy enforcement | not started | 0 | |
+| 15. DoD linkage framework | **done** | 11 | commit 53d1f89 |
+| 2. `test_01` (40 tools over stdio) | **done** | 90 | commit 46ee0f7 |
+| 3. `test_07` (control plane) | **done** | 27 | commit d24cb5a |
+| 4. `test_05` policy enforcement | **done** | 21 | commit 45c5741 |
 | 5. `test_06` artifact redaction | **done** | 9 | commit 67ccb33 |
-| 6. `test_03` workspace lifecycle | not started | 0 | |
-| 7. `test_04` managed process | not started | 0 | |
-| 8. `test_02` HTTP /mcp | not started | 0 | |
-| 9. `test_08` concurrency | not started | 0 | |
+| 6. `test_03` workspace lifecycle | **done** | 7 | commit 78f2652 |
+| 7. `test_04` managed process | **done** | 11 | this commit |
+| 8. `test_02` HTTP /mcp | **done** | 52 | this commit (fixed 2 server bugs: mount path + lifespan + bearer) |
+| 9. `test_08` concurrency | **done** | 3 | this commit |
 | 10. `test_09` Angular UI | not started | 0 | needs playwright |
 | 11. `test_10` UI automation | not started | 0 | needs desktop session |
 | 12. `test_11` OCR | not started | 0 | |
 | 13. `test_12` install/uninstall | not started | 0 | |
 | 14. `test_13` reboot persistence | manual gate | — | |
 
-### DoD coverage (after phase 15)
+### Phase 7 notes — managed process
+
+The e2e flow for `process.start_dev_server` exercises the closed
+preset registry + policy + approval + Job Object + Windows process
+group on a real subprocess. The lifecycle contract (start returns
+id+pid+log_handle, status reports the row, stop transitions to
+exited, OS pid is reaped) is verified through the MCP tool surface.
+
+The port-detection path is verified separately via
+`test_port_detection_via_preset_regex` because the
+`python-uvicorn` preset's default args inject `--reload`, and on
+Windows the reloader + Job Object + new process group combination
+drops the uvicorn startup banner before the monitor thread reads
+it. The custom preset + Python `print('http://127.0.0.1:PORT')`
+path in the test bypasses the reloader and proves the
+`port_hint_regex` + monitor thread + DB update contract.
+
+### Phase 8 notes — HTTP /mcp (and three server bugs that fell out)
+
+The full MCP tool surface (40 tools) round-trips through the
+streamable HTTP endpoint, and the bearer + origin + CSRF gates
+hold. **Three real bugs surfaced and were fixed in the same
+commit:**
+
+1. **Mount path** — `app.mount("/mcp", mcp.streamable_http_app())`
+   with the library default `streamable_http_path="/mcp"` put
+   the actual endpoint at `/mcp/mcp`. The canonical `/mcp` URL
+   307-redirected to a 404. Fix: pass `streamable_http_path="/"`
+   to `FastMCP` so the mount's root is the handler.
+2. **Session manager lifespan** — Starlette does not run the
+   mounted sub-app's lifespan, so the FastMCP
+   `StreamableHTTPSessionManager` task group was never
+   initialized. Every request blew up with "Task group is not
+   initialized". Fix: run `fastmcp._session_manager.run()` from
+   the parent FastAPI lifespan.
+3. **Bearer auth on /mcp** — the README and the design doc
+   both state `/mcp` requires `Authorization: Bearer <token>`,
+   but the server had no middleware enforcing it. Fix: extend
+   `OriginCSRF` to gate `/mcp` paths with the existing
+   `BearerAuth` helper.
+
+All three are covered by the e2e tests in `test_02_tool_surface_http.py`.
+
+### Phase 9 notes — concurrent clients
+
+10 stdio + 10 HTTP calls (each side running on a long-lived
+session, with the calls in flight in parallel) hit the same
+audit database. Every `run_id` is unique, every audit row is
+recorded, and concurrent `workspace.register` of the same path
+returns the same `workspace_id` to all callers (idempotent
+insert via the `canonical_root` UNIQUE constraint).
+
+### DoD coverage (after phase 9)
 
 ```
 change                           covered  pending  deferred
@@ -441,10 +493,11 @@ angular-ui-foundation                 10        6         0
 bootstrap-mcp-server                   2        0         4
 core-shell-and-audit                   9        0         1
 extended-tools-and-packaging           1        7         7
+managed-process-and-ports              7        0         2
 policy-and-safety                     13        0         2
 ui-automation-and-ocr                  3       13         5
 ------------------------------------------------------------
-TOTAL                                 38       26        19
+TOTAL                                 45       26        21
 ```
 
 The framework reports these numbers on every `pytest -m e2e` run

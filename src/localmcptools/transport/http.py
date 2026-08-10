@@ -110,7 +110,8 @@ class SecurityContext:
 
 
 class OriginCSRF(BaseHTTPMiddleware):
-    """ASGI middleware enforcing Origin + CSRF for ``/api/*``.
+    """ASGI middleware enforcing Origin + CSRF for ``/api/*`` and
+    Bearer auth for ``/mcp``.
 
     Paths starting with ``/api/csrf-token`` are exempt from the CSRF
     check — they exist specifically so the SPA can bootstrap itself.
@@ -122,7 +123,13 @@ class OriginCSRF(BaseHTTPMiddleware):
        ``lmcp_csrf`` cookie verbatim. Constant-time compare.
     3. ``GET / HEAD / OPTIONS`` skip step 2 (safe methods can't mutate).
 
-    Failure responses are JSON with a stable shape the SPA can switch on.
+    Paths under ``/mcp`` (the Streamable HTTP MCP endpoint) require
+    ``Authorization: Bearer <token>`` matching the per-boot secret.
+    The token is the *same* value the API uses for CSRF — one
+    32-byte random string serves both surfaces, by design.
+
+    Failure responses are JSON with a stable shape the SPA / agent
+    can switch on.
     """
 
     def __init__(self, app: ASGIApp, *, context: SecurityContext) -> None:
@@ -131,6 +138,12 @@ class OriginCSRF(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):  # type: ignore[override]
         path = request.url.path
+        # /mcp requires the bearer secret. The FastMCP transport has
+        # no built-in auth, so we gate it here. /mcp is the agent
+        # path — no Origin / CSRF check (it doesn't speak a browser
+        # protocol).
+        if path.startswith("/mcp"):
+            return await self._check_mcp_bearer(request, call_next)
         if not path.startswith("/api/"):
             return await call_next(request)
 
@@ -172,6 +185,28 @@ class OriginCSRF(BaseHTTPMiddleware):
                         "message": "X-LMCP-CSRF does not match cookie",
                     },
                 )
+        return await call_next(request)
+
+    async def _check_mcp_bearer(
+        self, request: Request, call_next
+    ):  # type: ignore[no-untyped-def]
+        """Verify the bearer token on every /mcp request. The token is
+        the same per-boot secret the SPA's CSRF cookie holds — one
+        32-byte URL-safe string covers both the agent path and the
+        browser control plane."""
+        auth = BearerAuth(expected=self._context.token)
+        if not auth.is_valid(request.headers.get("authorization")):
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "code": "unauthorized",
+                    "message": "Authorization: Bearer <token> required",
+                    "next_actions": [
+                        "read the bearer secret from server.json "
+                        "and resend with Authorization: Bearer <token>"
+                    ],
+                },
+            )
         return await call_next(request)
 
 

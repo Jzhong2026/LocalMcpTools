@@ -65,11 +65,18 @@ def build_server(
     audit_path: Path | None = None,
     profile: str = DEFAULT_PROFILE,
     policy_version: str = DEFAULT_POLICY_VERSION,
+    streamable_http_path: str = "/mcp",
 ) -> FastMCP:
     """Return a configured FastMCP instance.
 
     ``audit_path`` and ``profile``/``policy_version`` are exposed for
     tests; production callers pass nothing and inherit the defaults.
+
+    ``streamable_http_path`` controls the route the streamable HTTP
+    ASGI app exposes internally. Production passes ``""`` so that
+    when the app is mounted at ``/mcp`` the endpoint lands at exactly
+    ``/mcp``. Tests (and any code that calls ``streamable_http_app()``
+    directly without mounting) keep the library default of ``/mcp``.
     """
     init_db(audit_path)
     service = ToolExecutionService(
@@ -78,7 +85,7 @@ def build_server(
         policy_version=policy_version,
     )
     _register_tools(service)
-    mcp = _build_fast_mcp(service)
+    mcp = _build_fast_mcp(service, streamable_http_path=streamable_http_path)
     mcp._lmcp_execution_service = service  # type: ignore[attr-defined]
     return mcp
 
@@ -431,9 +438,13 @@ def _register_tools(service: ToolExecutionService) -> None:
     _log.debug("registered tools: %s", sorted(wrappers))
 
 
-def _build_fast_mcp(service: ToolExecutionService) -> FastMCP:
+def _build_fast_mcp(
+    service: ToolExecutionService,
+    *,
+    streamable_http_path: str = "/mcp",
+) -> FastMCP:
     """Create a FastMCP instance and register every wrapper with it."""
-    mcp = FastMCP(SERVER_NAME)
+    mcp = FastMCP(SERVER_NAME, streamable_http_path=streamable_http_path)
     wrappers: dict[str, object] = getattr(service, "_wrappers", {})
     for tool_name, wrapper in wrappers.items():
         reg = service.get_registration(tool_name)
@@ -516,7 +527,15 @@ def run_http(
 
     # Bring up the FastMCP server (so its tools are registered) but DO
     # NOT call ``server.run`` — we mount its ASGI app into FastAPI.
-    fastmcp = build_server()
+    #
+    # ``streamable_http_path="/"`` is critical: FastMCP defaults the
+    # path to ``/mcp``, so when we ``app.mount("/mcp", ...)`` the
+    # actual endpoint lands at ``/mcp/mcp`` (the mount prefix plus
+    # the sub-app's route) and the canonical ``/mcp`` URL 307-redirects
+    # to a 404. Setting the sub-route to ``/`` makes the mount's
+    # root the handler, so the MCP endpoint is reachable at exactly
+    # ``/mcp`` as the docs / mcp-config-snippet promise.
+    fastmcp = build_server(streamable_http_path="/")
     start_runtime()
 
     # Allocate the bearer / CSRF token once; both share it.
@@ -530,9 +549,15 @@ def run_http(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        # Stash the uvicorn server so ``/api/shutdown`` can poke it.
-        uvicorn_server = getattr(app.state, "uvicorn_server", None)
-        yield
+        # The FastMCP streamable HTTP transport creates a
+        # ``StreamableHTTPSessionManager`` whose task group is started
+        # by the sub-app's lifespan. Starlette's mount does *not*
+        # propagate the sub-app's lifespan to the parent, so the
+        # task group stays uninitialized and every /mcp request
+        # blows up with "Task group is not initialized". Run the
+        # session manager's run() here so the MCP endpoint works.
+        async with fastmcp._session_manager.run():  # type: ignore[attr-defined]
+            yield
 
     app = FastAPI(title="LocalMcpTools", lifespan=lifespan)
     static_dir = _ui_assets_dir()
