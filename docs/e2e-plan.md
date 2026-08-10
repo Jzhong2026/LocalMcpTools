@@ -421,7 +421,7 @@ on the critical path.
 | 2. `test_01` (40 tools over stdio) | **done** | 90 | this commit |
 | 3. `test_07` (control plane) | **done** | 27 | this commit |
 | 4. `test_05` policy enforcement | not started | 0 | |
-| 5. `test_06` artifact redaction | not started | 0 | |
+| 5. `test_06` artifact redaction | **done** | 9 | commit 67ccb33 |
 | 6. `test_03` workspace lifecycle | not started | 0 | |
 | 7. `test_04` managed process | not started | 0 | |
 | 8. `test_02` HTTP /mcp | not started | 0 | |
@@ -439,7 +439,7 @@ change                           covered  pending  deferred
 ------------------------------------------------------------
 angular-ui-foundation                 10        6         0
 bootstrap-mcp-server                   2        0         4
-core-shell-and-audit                   6        0         1
+core-shell-and-audit                   9        0         1
 extended-tools-and-packaging           1        7         7
 policy-and-safety                     13        0         2
 ui-automation-and-ocr                  3       13         5
