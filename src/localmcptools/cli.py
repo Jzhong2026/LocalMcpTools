@@ -224,17 +224,35 @@ def _cmd_stop() -> int:
         return EXIT_ERROR
     try:
         if os.name == "nt":
+            # ``/T`` walks the process tree (uvicorn worker children),
+            # ``/F`` forces termination when a graceful kill is rejected
+            # (common on Windows when the python process is in a JOB
+            # object or holds a console handle).
             result = subprocess.run(
-                ["taskkill", "/PID", str(pid), "/T"], check=False,
-                capture_output=True, timeout=10,
+                ["taskkill", "/F", "/PID", str(pid), "/T"],
+                check=False,
+                capture_output=True,
+                timeout=10,
             )
             if result.returncode != 0:
+                stderr = result.stderr.decode("utf-8", "replace").strip()
+                print(
+                    f"[localmcptools] taskkill failed (pid={pid}): {stderr}",
+                    file=sys.stderr,
+                )
                 return EXIT_ERROR
         else:
             import signal
+
             os.kill(pid, signal.SIGTERM)
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"[localmcptools] stop failed: {exc}", file=sys.stderr)
         return EXIT_ERROR
+    # The server's own finally block removes server.json on a graceful
+    # exit, but ``/F`` skips cleanup. Clear it ourselves so subsequent
+    # ``start`` calls don't trip the "another server appears to be
+    # running" guard.
+    server_json_path().unlink(missing_ok=True)
     return EXIT_OK
 
 

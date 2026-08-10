@@ -76,6 +76,16 @@ addopts = [
     "-v",
     "--tb=short",
     "--strict-markers",
+    # e2e suite is opt-in: `pytest -m e2e` runs it.
+    # Default `pytest` skips it so dev cycles stay fast.
+    "-m",
+    "not e2e",
+]
+markers = [
+    "e2e: end-to-end suite (spawns a real server process)",
+    "e2e_slow: > 60s e2e test",
+    "e2e_manual: needs user / reboot",
+    "e2e_admin: needs admin shell",
 ]
 asyncio_mode = "auto"
 
