@@ -202,6 +202,36 @@ REGISTRY: tuple[DoDEntry, ...] = (
             "test_stdio_initializes_and_lists_tools"
         ),
     ),
+    DoDEntry(
+        change="core-shell-and-audit",
+        section="1.10",
+        item="Bearer tokens in outputs are redacted before any persist",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_06_artifact_redaction.py::"
+            "test_artifact_file_on_disk_is_always_redacted"
+        ),
+    ),
+    DoDEntry(
+        change="core-shell-and-audit",
+        section="1.10",
+        item="Output tail streams large files without loading all bytes",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_06_artifact_redaction.py::"
+            "test_output_tail_streams_large_file"
+        ),
+    ),
+    DoDEntry(
+        change="core-shell-and-audit",
+        section="1.10",
+        item="Artifact handle is idempotent (same handle twice → same content)",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_06_artifact_redaction.py::"
+            "test_output_tail_idempotent"
+        ),
+    ),
     # --- policy-and-safety (Phase 2) ---
     DoDEntry(
         change="policy-and-safety",

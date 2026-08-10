@@ -444,7 +444,7 @@ extended-tools-and-packaging           1        7         7
 policy-and-safety                     13        0         2
 ui-automation-and-ocr                  3       13         5
 ------------------------------------------------------------
-TOTAL                                 35       26        19
+TOTAL                                 38       26        19
 ```
 
 The framework reports these numbers on every `pytest -m e2e` run
