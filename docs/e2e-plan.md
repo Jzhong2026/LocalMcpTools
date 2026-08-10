@@ -417,8 +417,8 @@ on the critical path.
 | Phase | Status | Tests | Notes |
 |---|---|---|---|
 | 1. Fixtures + helpers + stdio boot | **done** | 8 | commit d4fe2f8 |
-| 15. DoD linkage framework | **done** | 10 | this commit |
-| 2. `test_01` (40 tools over stdio) | not started | 0 | next up |
+| 15. DoD linkage framework | **done** | 10 | commit 53d1f89 |
+| 2. `test_01` (40 tools over stdio) | **done** | 90 | this commit |
 | 3. `test_07` (control plane) | not started | 0 | |
 | 4. `test_05` policy enforcement | not started | 0 | |
 | 5. `test_06` artifact redaction | not started | 0 | |

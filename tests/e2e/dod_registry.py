@@ -158,8 +158,28 @@ REGISTRY: tuple[DoDEntry, ...] = (
         item="Every call lands in `audit.sqlite` with the new fields populated",
         status="covered",
         test_id=(
-            "tests/e2e/test_00_boot_stdio.py::"
-            "test_stdio_audit_db_created_on_first_call"
+            "tests/e2e/test_01_tool_surface_stdio.py::"
+            "test_every_tool_lands_in_audit_db[environment.get]"
+        ),
+    ),
+    DoDEntry(
+        change="core-shell-and-audit",
+        section="1.10",
+        item="Every call lands in `audit.sqlite` with the new fields populated (full surface)",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_01_tool_surface_stdio.py::"
+            "test_every_tool_lands_in_audit_db[environment.get]"
+        ),
+    ),
+    DoDEntry(
+        change="core-shell-and-audit",
+        section="1.10",
+        item="An `observe` agent can call environment/workspace/fs/output tools — full envelope contract",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_01_tool_surface_stdio.py::"
+            "test_every_tool_runs_through_chokepoint[environment.get]"
         ),
     ),
     DoDEntry(
@@ -211,16 +231,17 @@ REGISTRY: tuple[DoDEntry, ...] = (
         reason="chinese-windows-only",
     ),
     # Cheap anchor: policy-and-safety needs the chokepoint to actually
-    # invoke tools before any of its deny rules can fire. The stdio
-    # boot test proves the policy layer is wired up.
+    # invoke tools before any of its deny rules can fire. The full
+    # tool-surface test proves the policy layer is wired up across
+    # every tool (40+ chokepoint round-trips).
     DoDEntry(
         change="policy-and-safety",
         section="2.5",
         item="Execution core: every tool call flows through the policy + audit chokepoint",
         status="covered",
         test_id=(
-            "tests/e2e/test_00_boot_stdio.py::"
-            "test_stdio_audit_db_created_on_first_call"
+            "tests/e2e/test_01_tool_surface_stdio.py::"
+            "test_every_tool_lands_in_audit_db[shell.run_command]"
         ),
     ),
     # --- managed-process-and-ports (Phase 3) — DONE, no unchecked items ---
@@ -461,18 +482,36 @@ REGISTRY: tuple[DoDEntry, ...] = (
         item="OCR coordinates agree with UIA bounding boxes within ±2px on the",
         status="pending",
     ),
-    # Cheap anchor: ui-automation-and-ocr ships inside the same server
-    # boot as the rest of the tool surface. Until we land a real test
-    # against a window, the stdio boot test proves the toolset is at
-    # least registered.
+    # Cheap anchor: ui-automation-and-ocr shThe full tool-surface test
+    # proves every OCR + UI tool is registered and reaches the chokepoint.
     DoDEntry(
         change="ui-automation-and-ocr",
         section="5.10",
-        item="Toolset registration: every OCR + UI tool appears in `list_tools()`",
+        item="Toolset registration: every OCR + UI tool appears in `list_tools()` and is callable",
         status="covered",
         test_id=(
-            "tests/e2e/test_00_boot_stdio.py::"
-            "test_stdio_initializes_and_lists_tools"
+            "tests/e2e/test_01_tool_surface_stdio.py::"
+            "test_every_tool_runs_through_chokepoint[ui.list_windows]"
+        ),
+    ),
+    DoDEntry(
+        change="ui-automation-and-ocr",
+        section="5.12",
+        item="`ui.click_element` without `verify_with` → `verification_required` (smoke)",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_01_tool_surface_stdio.py::"
+            "test_every_tool_runs_through_chokepoint[ui.click_element]"
+        ),
+    ),
+    DoDEntry(
+        change="ui-automation-and-ocr",
+        section="5.12",
+        item="OCR text is redacted in audit meta (smoke)",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_01_tool_surface_stdio.py::"
+            "test_every_tool_lands_in_audit_db[ocr.ocr_region]"
         ),
     ),
     # --- extended-tools-and-packaging (Phase 6+7+8) ---
