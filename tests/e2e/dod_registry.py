@@ -215,13 +215,19 @@ REGISTRY: tuple[DoDEntry, ...] = (
         change="policy-and-safety",
         section="2.8",
         item="`control_api.py`: `POST /api/rules/reload` returns",
-        status="pending",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_07_http_control_plane.py::test_rules_reload"
+        ),
     ),
     DoDEntry(
         change="policy-and-safety",
         section="2.8",
         item="Smoke test: add a temp rule, hit endpoint, see it active",
-        status="pending",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_07_http_control_plane.py::test_rules_list"
+        ),
     ),
     DoDEntry(
         change="policy-and-safety",
@@ -316,8 +322,57 @@ REGISTRY: tuple[DoDEntry, ...] = (
         item="Origin/Host/CSRF enforced (verified by integration tests)",
         status="covered",
         test_id=(
-            "tests/e2e/test_00_boot_stdio.py::"
-            "test_http_rejects_missing_origin"
+            "tests/e2e/test_07_http_control_plane.py::"
+            "test_wrong_origin_rejected"
+        ),
+    ),
+    DoDEntry(
+        change="angular-ui-foundation",
+        section="4.9",
+        item="POST without CSRF rejected on /api/*",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_07_http_control_plane.py::"
+            "test_post_without_csrf_rejected"
+        ),
+    ),
+    DoDEntry(
+        change="angular-ui-foundation",
+        section="4.9",
+        item="Every /api/* control-plane endpoint responds as documented (21 endpoints)",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_07_http_control_plane.py::test_status"
+        ),
+    ),
+    DoDEntry(
+        change="angular-ui-foundation",
+        section="4.9",
+        item="/api/csrf-token bootstraps the SPA without itself requiring CSRF",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_07_http_control_plane.py::"
+            "test_csrf_token_bootstrap"
+        ),
+    ),
+    DoDEntry(
+        change="angular-ui-foundation",
+        section="4.9",
+        item="/api/mcp-config-snippet returns usable codebuddy + copilot snippets",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_07_http_control_plane.py::"
+            "test_mcp_config_snippet"
+        ),
+    ),
+    DoDEntry(
+        change="angular-ui-foundation",
+        section="4.9",
+        item="/api/settings round-trips (GET → POST → GET)",
+        status="covered",
+        test_id=(
+            "tests/e2e/test_07_http_control_plane.py::"
+            "test_settings_post_round_trip"
         ),
     ),
     DoDEntry(

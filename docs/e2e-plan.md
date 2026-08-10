@@ -419,7 +419,7 @@ on the critical path.
 | 1. Fixtures + helpers + stdio boot | **done** | 8 | commit d4fe2f8 |
 | 15. DoD linkage framework | **done** | 10 | commit 53d1f89 |
 | 2. `test_01` (40 tools over stdio) | **done** | 90 | this commit |
-| 3. `test_07` (control plane) | not started | 0 | |
+| 3. `test_07` (control plane) | **done** | 27 | this commit |
 | 4. `test_05` policy enforcement | not started | 0 | |
 | 5. `test_06` artifact redaction | not started | 0 | |
 | 6. `test_03` workspace lifecycle | not started | 0 | |
@@ -437,14 +437,14 @@ on the critical path.
 ```
 change                           covered  pending  deferred
 ------------------------------------------------------------
-angular-ui-foundation                  5       11         0
+angular-ui-foundation                 10        6         0
 bootstrap-mcp-server                   2        0         4
-core-shell-and-audit                   4        0         1
+core-shell-and-audit                   6        0         1
 extended-tools-and-packaging           1        7         7
-policy-and-safety                      1        2         2
-ui-automation-and-ocr                  1       13         5
+policy-and-safety                      3        0         2
+ui-automation-and-ocr                  3       13         5
 ------------------------------------------------------------
-TOTAL                                 14       33        19
+TOTAL                                 25       26        19
 ```
 
 The framework reports these numbers on every `pytest -m e2e` run
