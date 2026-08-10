@@ -55,6 +55,12 @@ ERR_PORT_NOT_FOUND = "port_not_found"
 ERR_NOT_EXPOSED = "not_exposed"
 ERR_SERVER_SHUTTING_DOWN = "server_shutting_down"
 
+# Added by change-7 (extended-tools-and-packaging).
+ERR_VSCODE_NOT_RUNNING = "vscode_not_running"
+ERR_RUNTIME_NOT_FOUND = "runtime_not_found"
+ERR_TASK_CREATE_FAILED = "task_create_failed"
+ERR_ALREADY_INSTALLED = "already_installed"
+
 STANDARD_ERROR_CODES: tuple[str, ...] = (
     ERR_INTERNAL_ERROR,
     ERR_INVALID_ARGS,
@@ -78,6 +84,10 @@ STANDARD_ERROR_CODES: tuple[str, ...] = (
     ERR_PORT_NOT_FOUND,
     ERR_NOT_EXPOSED,
     ERR_SERVER_SHUTTING_DOWN,
+    ERR_VSCODE_NOT_RUNNING,
+    ERR_RUNTIME_NOT_FOUND,
+    ERR_TASK_CREATE_FAILED,
+    ERR_ALREADY_INSTALLED,
 )
 
 

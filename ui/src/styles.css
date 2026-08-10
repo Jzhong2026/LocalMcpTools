@@ -1,0 +1,17 @@
+/* LocalMcpTools SPA — global styles
+ *
+ * Kept minimal so the Angular build picks up Material's theme tokens
+ * via the @angular/material prebuilt theme (loaded by the AppComponent
+ * template). Custom CSS lives in each component.
+ */
+
+html, body { height: 100%; margin: 0; }
+body { font-family: Roboto, "Helvetica Neue", sans-serif; background: #fafafa; color: #222; }
+
+a { color: #1976d2; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.lmcp-error { color: #c62828; }
+.lmcp-muted { color: #666; }
+.lmcp-row { display: flex; align-items: center; gap: 8px; }
+.lmcp-spacer { flex: 1; }

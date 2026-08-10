@@ -26,6 +26,7 @@ The change-2 (core-shell-and-audit) tool surface is:
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import cast
 
@@ -37,7 +38,17 @@ from .execution.service import (
     ToolExecutionService,
 )
 from .persistence.db import init_db
-from .tools import environment, fs, output, process, shell, workspace
+from .tools import (
+    diagnostics,
+    environment,
+    fs,
+    output,
+    process,
+    runtime,
+    shell,
+    vscode,
+    workspace,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -267,6 +278,63 @@ def _register_tools(service: ToolExecutionService) -> None:
         param_names=("port",),
     )
 
+    wrappers["runtime.detect_runtime"] = service.register(
+        "runtime.detect_runtime", runtime.runtime_detect_runtime,
+        title="Detect runtimes on PATH",
+        description="List python / node / dotnet / npm copies on PATH with version and is_default marker.",
+        param_names=("workspace_id",),
+    )
+    wrappers["runtime.get_env"] = service.register(
+        "runtime.get_env", runtime.runtime_get_env,
+        title="Get one environment variable",
+        description="Return a single env var with redacted value and process/user/system source.",
+        param_names=("name",),
+    )
+    wrappers["runtime.list_path"] = service.register(
+        "runtime.list_path", runtime.runtime_list_path,
+        title="List PATH entries",
+        description="Return every directory on PATH with exists/is_file and project-aware runtime marker.",
+        param_names=("workspace_id",),
+    )
+
+    wrappers["vscode.get_problems"] = service.register(
+        "vscode.get_problems", vscode.vscode_get_problems,
+        title="Read VS Code Problems panel",
+        description="Read-only fetch of the current VS Code Problems list; returns vscode_not_running if VS Code is offline.",
+        param_names=("severity", "workspace_path"),
+    )
+    wrappers["vscode.get_installed_extensions"] = service.register(
+        "vscode.get_installed_extensions", vscode.vscode_get_installed_extensions,
+        title="List VS Code extensions",
+        description="Read installed extensions.json and return id/name/version/is_active per extension.",
+        param_names=(),
+    )
+    wrappers["vscode.get_logs"] = service.register(
+        "vscode.get_logs", vscode.vscode_get_logs,
+        title="Tail VS Code log channel",
+        description="Tail a named VS Code output channel log; read-only against %APPDATA%\\Code\\logs.",
+        param_names=("channel", "n"),
+    )
+    wrappers["vscode.get_debug_sessions"] = service.register(
+        "vscode.get_debug_sessions", vscode.vscode_get_debug_sessions,
+        title="List VS Code debug sessions",
+        description="Read debug.sessions from VS Code state; empty when nothing is running.",
+        param_names=(),
+    )
+
+    wrappers["diagnostics.collect"] = service.register(
+        "diagnostics.collect", diagnostics.diagnostics_collect,
+        title="Aggregate diagnostics snapshot",
+        description="One call fans out to runtime / git / problems / ports / recent failures.",
+        param_names=("workspace_id", "depth", "limit"),
+    )
+    wrappers["diagnostics.explain_failure"] = service.register(
+        "diagnostics.explain_failure", diagnostics.diagnostics_explain_failure,
+        title="Explain a single run",
+        description="Classify a prior run_id, pull key evidence, and emit next_actions.",
+        param_names=("run_id", "row"),
+    )
+
     # Attach the wrappers to the service so _build_fast_mcp can pull
     # them out and register with the MCP server.
     service._wrappers = wrappers  # type: ignore[attr-defined]
@@ -308,4 +376,172 @@ def run_stdio() -> None:
         shutdown_runtime()
 
 
-__all__ = ["SERVER_NAME", "build_server", "run_stdio"]
+# --- HTTP / shared-mode entry point ---------------------------------------
+
+
+def run_http(
+    *,
+    host: str = "127.0.0.1",
+    port: int = 7890,
+    auto_open_browser: bool = False,
+) -> None:
+    """Boot the server in HTTP shared mode.
+
+    Brings up the FastAPI app with the control plane, MCP endpoint, and
+    static UI mount. Blocks until the operator hits ``POST /api/shutdown``
+    or sends Ctrl+C.
+
+    The bearer / CSRF token is generated once and persisted in
+    ``server.json`` alongside the bound port so other processes (the UI,
+    agents over HTTP) can pick it up.
+    """
+    import json
+    import os
+    import webbrowser
+    from contextlib import asynccontextmanager
+
+    from fastapi import FastAPI
+
+    from .config.paths import server_json_path
+    from .execution.background import shutdown_runtime, start_runtime
+    from .transport import SecurityContext, mount_app
+
+    # Refuse to bind anywhere other than loopback. OpenSpec invariant.
+    if host not in {"127.0.0.1", "localhost", "::1"}:
+        raise ValueError(f"server.host must be loopback, got {host!r}")
+
+    # Check for stale server.json — refuse to overwrite a live instance.
+    state = server_json_path()
+    if state.exists():
+        try:
+            existing = json.loads(state.read_text(encoding="utf-8"))
+            existing_pid = int(existing.get("pid") or 0)
+            if existing_pid and existing_pid != os.getpid() and _pid_alive(existing_pid):
+                raise RuntimeError(
+                    f"another server appears to be running at port "
+                    f"{existing.get('port')} (pid={existing_pid})"
+                )
+        except (OSError, ValueError):
+            pass
+
+    # Bring up the FastMCP server (so its tools are registered) but DO
+    # NOT call ``server.run`` — we mount its ASGI app into FastAPI.
+    fastmcp = build_server()
+    start_runtime()
+
+    # Allocate the bearer / CSRF token once; both share it.
+    from .transport.http import generate_token
+
+    token = generate_token()
+    context = SecurityContext(
+        token=token,
+        origin_allowlist=("http://127.0.0.1", "http://localhost"),
+    )
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # Stash the uvicorn server so ``/api/shutdown`` can poke it.
+        uvicorn_server = getattr(app.state, "uvicorn_server", None)
+        yield
+
+    app = FastAPI(title="LocalMcpTools", lifespan=lifespan)
+    static_dir = _ui_assets_dir()
+    mount_app(
+        app=app,
+        context=context,
+        control_router=_build_control_router(),
+        mcp_asgi_app=fastmcp.streamable_http_app(),
+        static_dir=static_dir,
+    )
+
+    # Persist server.json BEFORE binding so the UI / external agents can
+    # read the URL even during the boot window.
+    state.parent.mkdir(parents=True, exist_ok=True)
+    state.write_text(
+        json.dumps(
+            {
+                "pid": os.getpid(),
+                "host": host,
+                "port": port,
+                "started_at": int(time.time() * 1000),
+                "csrf_token": token,
+                "transport": "http",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    if auto_open_browser:
+        try:
+            webbrowser.open(f"http://{host}:{port}/ui/")
+        except OSError as exc:  # noqa: BLE001
+            _log.warning("could not open browser: %s", exc)
+
+    import uvicorn
+
+    config = uvicorn.Config(
+        app=app,
+        host=host,
+        port=port,
+        log_level="info",
+        access_log=False,
+    )
+    server = uvicorn.Server(config)
+    # Make the uvicorn server reachable from the request handler so
+    # ``/api/shutdown`` can stop the loop.
+    server.install_signal_handlers = lambda: None  # type: ignore[method-assign]
+    try:
+        server.run()
+    finally:
+        service = cast(
+            ToolExecutionService,
+            fastmcp._lmcp_execution_service,  # type: ignore[attr-defined]
+        )
+        service.begin_shutdown(5.0)
+        shutdown_runtime()
+        try:
+            state.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _pid_alive(pid: int) -> bool:
+    """Best-effort check whether ``pid`` is still running (Windows-aware)."""
+    try:
+        import psutil
+
+        return psutil.pid_exists(pid) and psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
+    except (OSError, ImportError, ValueError):
+        return False
+
+
+def _ui_assets_dir() -> str | None:
+    """Return the path to the built Angular bundle, or None when absent.
+
+    The bundle lives at ``src/localmcptools/ui_assets`` and is produced
+    by ``scripts/build_frontend.bat``. If the SPA has never been built
+    we return ``None`` and skip the static mount — the FastAPI app
+    stays useful for the control plane + MCP endpoint.
+    """
+    import os
+
+    here = os.path.dirname(__file__)
+    candidate = os.path.join(here, "ui_assets")
+    if os.path.isdir(candidate) and os.path.exists(os.path.join(candidate, "index.html")):
+        return candidate
+    return None
+
+
+def _build_control_router() -> object:
+    """Lazily build the control plane router.
+
+    Importing :mod:`localmcptools.control_api` at module-load time pulls
+    FastAPI / Pydantic into a process that may only need stdio; this
+    deferred import keeps the stdio path lean.
+    """
+    from .control_api import router
+
+    return router
+
+
+__all__ = ["SERVER_NAME", "build_server", "run_http", "run_stdio"]

@@ -28,13 +28,13 @@ its specs are reflected in the running server.
 
 | # | change-id | plan phases | theme | status |
 |---|---|---|---|---|
-| 1 | `bootstrap-mcp-server` | 0 | Compatibility + security spike | proposed |
-| 2 | `core-shell-and-audit` | 1 | Fix "agent gets no result" | proposed |
-| 3 | `policy-and-safety` | 2 | Server-side authority + approval | proposed |
-| 4 | `managed-process-and-ports` | 3 | Managed dev server + port queries | proposed |
-| 5 | `angular-ui-foundation` | 4 | Local browser UI for audit + settings | proposed |
+| 1 | `bootstrap-mcp-server` | 0 | Compatibility + security spike | done *(live-agent hand-off owed)* |
+| 2 | `core-shell-and-audit` | 1 | Fix "agent gets no result" | done |
+| 3 | `policy-and-safety` | 2 | Server-side authority + approval | done |
+| 4 | `managed-process-and-ports` | 3 | Managed dev server + port queries | done |
+| 5 | `angular-ui-foundation` | 4 | Local browser UI for audit + settings | done *(live browser smoke-test owed)* |
 | 6 | `ui-automation-and-ocr` | 5 | UIA + OCR-backed UI verification | proposed |
-| 7 | `extended-tools-and-packaging` | 6 + 7 + 8 | Diagnostic extras, packaging, cross-agent verify | proposed |
+| 7 | `extended-tools-and-packaging` | 6 + 7 + 8 | Diagnostic extras, packaging, cross-agent verify | done *(reboot smoke-test owed)* |
 
 ## Dependency Graph
 

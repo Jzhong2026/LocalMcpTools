@@ -5,12 +5,62 @@ A local Model Context Protocol (MCP) toolset for VS Code agents
 
 ## Status
 
-**Phase 3 (`managed-process-and-ports`)**. The stdio MCP server now includes
-read-only environment/workspace/file/output inspection, controlled shell and
-workspace presets, approval and deny-rule enforcement, and lifecycle-bound
-development servers. See [`openspec/changes/`](openspec/changes/) for the
-contracts and [`docs/implementation-plan.md`](docs/implementation-plan.md) for
-the full roadmap.
+**Phase 4 (`angular-ui-foundation`) backend + Angular skeleton complete**;
+UI-automation and OCR remain in later changes.
+
+What's shipped:
+
+- **Read-only diagnostics**: `environment.get`, `workspace.register / list /
+  inspect / search_text / git_status`, `fs.read_range / tail_log_file /
+  grep_files`, `output.tail / read_range / search`, `runtime.detect_runtime /
+  get_env / list_path`, `vscode.get_problems / get_installed_extensions /
+  get_logs / get_debug_sessions`, `diagnostics.collect /
+  explain_failure`.
+- **Controlled side effects**: `shell.run_command`, `workspace.run_test /
+  build / lint`, with server-side `observe` / `workspace_exec` profile gating
+  + one-time human approvals + 10 built-in deny rules (Format-Volume,
+  Format/diskpart, cipher /w, rm-system, bcdedit/bootrec, netsh reset,
+  registry HKLM, privilege escalation, kill-protected, RDP enable,
+  remote-download-exec).
+- **Lifecycle-bound dev servers**: `process.start_dev_server /
+  get_status / list_managed / stop_managed / list_listening_ports /
+  find_by_port`. Children are attached to a Windows Job Object so they die
+  with the server.
+- **HTTP control plane**: `localmcptools start --http` boots a FastAPI app
+  on `127.0.0.1:7890` (configurable) with Origin allowlist, CSRF
+  double-submit, bearer auth for `/mcp`, and 14 control endpoints
+  (`/api/status`, `/api/audit`, `/api/rules`, `/api/backgrounds`,
+  `/api/settings`, `/api/mcp-config-snippet`, `/api/shutdown`, ...).
+- **Angular SPA**: Dashboard / Audit / Settings / Rules / MCP-config
+  pages under `ui/`. Build with `scripts/build_frontend.bat`; the bundle
+  lands in `src/localmcptools/ui_assets/` and is served at `/ui/`.
+- **Packaging**: `localmcptools install [--method scheduled_task|startup_folder]`
+  registers a user-level (no admin) Windows scheduled task; `uninstall`
+  removes it. Idempotent.
+
+What's still open: UI Automation + OCR (`ui-automation-and-ocr`), and
+the live cross-agent hand-off check for `workbuddy` / `minimax code`.
+See [`openspec/changes/`](openspec/changes/) for the contracts and
+[`docs/implementation-plan.md`](docs/implementation-plan.md) for the full
+roadmap.
+
+## HTTP control plane + UI
+
+```powershell
+# Start the FastAPI app + control plane + UI on the loopback.
+localmcptools start --http --port 7890 --auto-open-browser
+
+# In another shell: build the Angular SPA so the static mount has content.
+scripts\build_frontend.bat   # runs `npm install` if needed, then `ng build --prod`
+
+# Browse to http://127.0.0.1:7890/ui/
+```
+
+Bearer secret for `/mcp` is generated at boot and stored in
+`%APPDATA%\LocalMcpTools\server.json` next to the bound port.
+CSRF double-submit protects every unsafe `/api/*` request; the SPA
+fetches `/api/csrf-token` on first load and includes the
+`X-LMCP-CSRF` header from then on.
 
 ## Quick start
 
@@ -62,3 +112,28 @@ they are terminated when the MCP server exits.
 Runtime state (audit log, settings, logs) lives under
 `%APPDATA%\LocalMcpTools\` by default. Override with the
 `LMCP_DATA_DIR` environment variable for tests or portable installs.
+
+## Auto-start on logon (Windows)
+
+```powershell
+# Register a user-level scheduled task. No admin required.
+localmcptools install
+
+# Or, if scheduled-task creation fails, drop a .lnk in the Startup folder.
+localmcptools install --method startup_folder
+
+# To remove
+localmcptools uninstall
+```
+
+The task boots `python -m localmcptools start` from the repo root at user
+logon, with `RestartCount=3, RestartInterval=1min` so transient failures
+self-heal. The scheduled task never runs elevated, so it cannot affect
+other users.
+
+## Configuring your agent
+
+See [`docs/agent-configuration.md`](docs/agent-configuration.md) for the
+per-agent `mcp.json` locations and snippets (codebuddy, GitHub Copilot,
+workbuddy, minimax code — last two marked "untested" until those agents
+ship a public MCP spec).

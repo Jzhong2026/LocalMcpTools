@@ -36,18 +36,39 @@ class RuleEngine:
         self._builtin_dir = builtin_dir or Path(__file__).with_name("builtin")
         self._custom_dir = custom_dir
         self._rules: tuple[Rule, ...] = ()
+        self._disabled: frozenset[str] = frozenset()
 
     def reload(self) -> dict[str, Any]:
         loaded, errors = load_all(self._builtin_dir, self._custom_dir)
         self._rules = tuple(loaded)
+        # Drop any disabled ids that no longer exist after reload.
+        existing_ids = {rule.id for rule in self._rules}
+        self._disabled = frozenset(self._disabled & existing_ids)
         return {"reloaded": len(loaded), "errors": errors}
 
     def match(self, cmd: str, args: list[str] | None = None) -> RuleMatch | None:
         command = " ".join([cmd, *(args or [])])
         for rule in self._rules:
+            if rule.id in self._disabled:
+                continue
             if any(_matches_clause(command, clause) for clause in rule.clauses):
                 return RuleMatch(rule.id, rule.severity, rule.suggestion)
         return None
+
+    def set_enabled(self, rule_id: str, enabled: bool) -> bool:
+        """Toggle a rule on/off. Returns True if the id was known."""
+        if not any(rule.id == rule_id for rule in self._rules):
+            return False
+        if enabled:
+            self._disabled = self._disabled - {rule_id}
+        else:
+            self._disabled = self._disabled | {rule_id}
+        return True
+
+    @property
+    def disabled_ids(self) -> frozenset[str]:
+        """Currently disabled rule ids (read-only snapshot)."""
+        return self._disabled
 
 
 def load_all(builtin_dir: Path, custom_dir: Path | None = None) -> tuple[list[Rule], list[dict[str, str]]]:

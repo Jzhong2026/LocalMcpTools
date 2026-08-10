@@ -1,0 +1,15 @@
+{
+  "/api/*": {
+    "target": "http://127.0.0.1:7890",
+    "secure": false,
+    "changeOrigin": false,
+    "logLevel": "warn"
+  },
+  "/mcp": {
+    "target": "http://127.0.0.1:7890",
+    "secure": false,
+    "ws": true,
+    "changeOrigin": false,
+    "logLevel": "warn"
+  }
+}

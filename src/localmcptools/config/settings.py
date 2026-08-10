@@ -75,3 +75,16 @@ def _merge(defaults: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
         else:
             out[key] = value
     return out
+
+
+def save_settings(payload: dict[str, Any], *, path: Path | None = None) -> Path:
+    """Write ``payload`` to ``config.json`` (used by ``/api/settings``).
+
+    ``path`` defaults to :func:`.paths.config_path`. Returns the path
+    written so callers can echo it back. Raises on I/O failure — the
+    control plane translates the exception to a 400.
+    """
+    target = path if path is not None else config_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return target
