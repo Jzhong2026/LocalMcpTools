@@ -409,3 +409,39 @@ on the critical path.
    Windows VM and get green in < 30 min.
 5. The release checklist includes a line: "manual reboot test
    recorded in `docs/reports/<date>.md`".
+---
+
+## 14. Progress
+
+| Phase | Status | Tests | Notes |
+|---|---|---|---|
+| 1. Fixtures + helpers + stdio boot | **done** | 8 | committed in d4fe2f8 |
+| 2. 	est_01 (40 tools over stdio) | not started | 0 | next up |
+| 3. 	est_07 (control plane) | not started | 0 | |
+| 4. 	est_05 policy enforcement | not started | 0 | |
+| 5. 	est_06 artifact redaction | not started | 0 | |
+| 6. 	est_03 workspace lifecycle | not started | 0 | |
+| 7. 	est_04 managed process | not started | 0 | |
+| 8. 	est_02 HTTP /mcp | not started | 0 | |
+| 9. 	est_08 concurrency | not started | 0 | |
+| 10. 	est_09 Angular UI | not started | 0 | needs playwright |
+| 11. 	est_10 UI automation | not started | 0 | needs desktop session |
+| 12. 	est_11 OCR | not started | 0 | |
+| 13. 	est_12 install/uninstall | not started | 0 | |
+| 14. 	est_13 reboot persistence | manual gate | ¡ª | |
+| 15. 	est_99 DoD linkage | not started | 0 | |
+
+**Bugs found and fixed during phase 1 (commit d4fe2f8):**
+
+* cli.py _cmd_stop used 	askkill /PID /T without /F ¡ª Windows
+  rejects graceful kill of python processes that hold a console handle
+  or sit in a JOB object. Added /F and unlink(server.json) after
+  success so subsequent start doesn't trip the staleness guard.
+* subprocess.Popen.pid on Python 3.14 Windows is unreliable (the
+  handle doesn't track the actual child pid). Fixture uses
+  meta["pid"] from server.json instead.
+* /api/status returns its dict directly (no universal envelope).
+  Updated test to assert against ody["server"]["transport"] and
+  ody["server"]["audit_db_initialised"].
+* Schema version lives in a schema_version table, not
+  PRAGMA user_version. Test updated.
