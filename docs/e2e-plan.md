@@ -1,4 +1,4 @@
-# LocalMcpTools — E2E Test Plan
+﻿# LocalMcpTools 鈥?E2E Test Plan
 
 > Status: **draft v1**
 > Last updated: 2026-08-10
@@ -20,7 +20,7 @@ integration suite (`tests/integration/`) only covers **two** slices:
 
 What's missing: full-surface round-trips through **stdio + HTTP**,
 real Windows artifacts (ports, windows, OCR text), **cross-tool
-flows** (register → inspect → search → build → tail log),
+flows** (register 鈫?inspect 鈫?search 鈫?build 鈫?tail log),
 **multi-client concurrency**, **policy enforcement** on real tool
 calls, **packaging smoke** (installed task, autostart .lnk), and
 **reboot persistence**. That's the gap this plan closes.
@@ -44,7 +44,7 @@ calls, **packaging smoke** (installed task, autostart .lnk), and
 
 - Performance / load testing beyond the concurrency scenarios.
 - Model-quality assertions on agent output.
-- macOS / Linux — the project is Windows-only by spec.
+- macOS / Linux 鈥?the project is Windows-only by spec.
 - OCR accuracy benchmarks (separate manual effort; recorded in
   `ui-automation-and-ocr/tasks.md`).
 
@@ -63,27 +63,27 @@ Browsers: Edge + Chrome for the UI tests
 
 ```
 tests/
-├── integration/          ← existing in-process tests (kept)
-└── e2e/                  ← NEW: this plan
-    ├── conftest.py                shared fixtures + helpers
-    ├── _clients/                  reusable stdio + http clients
-    ├── _fixtures/                 workspace / fixture / cleanup helpers
-    ├── _report/                   junit + html + screenshot collector
-    ├── test_00_boot_stdio.py
-    ├── test_01_tool_surface_stdio.py
-    ├── test_02_tool_surface_http.py
-    ├── test_03_workspace_lifecycle.py
-    ├── test_04_managed_process.py
-    ├── test_05_policy_enforcement.py
-    ├── test_06_artifact_redaction.py
-    ├── test_07_http_control_plane.py
-    ├── test_08_concurrent_clients.py
-    ├── test_09_angular_ui.py
-    ├── test_10_ui_automation_windows.py
-    ├── test_11_ocr_round_trip.py
-    ├── test_12_install_uninstall.py
-    ├── test_13_reboot_persistence.py        ← manual gate, not in CI
-    └── test_99_dod_checklist.py             ← mirrors each change's DoD
+鈹溾攢鈹€ integration/          鈫?existing in-process tests (kept)
+鈹斺攢鈹€ e2e/                  鈫?NEW: this plan
+    鈹溾攢鈹€ conftest.py                shared fixtures + helpers
+    鈹溾攢鈹€ _clients/                  reusable stdio + http clients
+    鈹溾攢鈹€ _fixtures/                 workspace / fixture / cleanup helpers
+    鈹溾攢鈹€ _report/                   junit + html + screenshot collector
+    鈹溾攢鈹€ test_00_boot_stdio.py
+    鈹溾攢鈹€ test_01_tool_surface_stdio.py
+    鈹溾攢鈹€ test_02_tool_surface_http.py
+    鈹溾攢鈹€ test_03_workspace_lifecycle.py
+    鈹溾攢鈹€ test_04_managed_process.py
+    鈹溾攢鈹€ test_05_policy_enforcement.py
+    鈹溾攢鈹€ test_06_artifact_redaction.py
+    鈹溾攢鈹€ test_07_http_control_plane.py
+    鈹溾攢鈹€ test_08_concurrent_clients.py
+    鈹溾攢鈹€ test_09_angular_ui.py
+    鈹溾攢鈹€ test_10_ui_automation_windows.py
+    鈹溾攢鈹€ test_11_ocr_round_trip.py
+    鈹溾攢鈹€ test_12_install_uninstall.py
+    鈹溾攢鈹€ test_13_reboot_persistence.py        鈫?manual gate, not in CI
+    鈹斺攢鈹€ test_99_dod_checklist.py             鈫?mirrors each change's DoD
 ```
 
 The directory is excluded from the default pytest run by default
@@ -121,7 +121,7 @@ The directory is excluded from the default pytest run by default
 - Cold-boot: assert `audit.sqlite` is created with schema_version=5 on first call.
 - Tear down: assert `localmcptools stop` removes `server.json` and frees the port.
 
-### 7.2 Tool surface — stdio (test_01)
+### 7.2 Tool surface 鈥?stdio (test_01)
 
 For **every one of the 40 tools**:
 
@@ -136,28 +136,28 @@ For **every one of the 40 tools**:
 Exceptions:
 
 - Tools with **destructive defaults** (e.g. `shell.run_command` with
-  a deny rule) — exercise the deny path, not the success path.
+  a deny rule) 鈥?exercise the deny path, not the success path.
 
-### 7.3 Tool surface — HTTP (test_02)
+### 7.3 Tool surface 鈥?HTTP (test_02)
 
 Same matrix as 7.2 but routed through `/mcp` with Bearer auth.
 Prove:
 
-- Missing Bearer → 401.
-- Wrong Bearer → 401.
-- Expired Bearer → 401.
-- Origin not in allowlist → 403.
-- Origin in allowlist but missing CSRF → 403.
-- Origin in allowlist + CSRF → 200 + valid envelope.
+- Missing Bearer 鈫?401.
+- Wrong Bearer 鈫?401.
+- Expired Bearer 鈫?401.
+- Origin not in allowlist 鈫?403.
+- Origin in allowlist but missing CSRF 鈫?403.
+- Origin in allowlist + CSRF 鈫?200 + valid envelope.
 
 ### 7.4 Workspace lifecycle (test_03)
 
 End-to-end multi-step:
 
 ```
-register → inspect → search_text → fs.read_range →
-output.tail(of build.log) → workspace.build (or skip on no make) →
-output.search → workspace.list
+register 鈫?inspect 鈫?search_text 鈫?fs.read_range 鈫?
+output.tail(of build.log) 鈫?workspace.build (or skip on no make) 鈫?
+output.search 鈫?workspace.list
 ```
 
 Asserts:
@@ -204,7 +204,7 @@ For **every deny rule in `policy/builtin_rules.json`**:
   file via OS open).
 - Assert artifact ACL denies a low-priv process token from
   reading it (use `icacls` to inspect).
-- 50 MB fixture → assert `output.tail` does not load all bytes
+- 50 MB fixture 鈫?assert `output.tail` does not load all bytes
   (memory profiler check).
 
 ### 7.8 HTTP control plane (test_07)
@@ -235,10 +235,10 @@ For **every deny rule in `policy/builtin_rules.json`**:
 
 Every endpoint is also exercised against:
 
-- Wrong / missing Bearer → 401
-- Wrong / missing CSRF → 403
-- Wrong Origin → 403
-- After `POST /shutdown` → connection refused
+- Wrong / missing Bearer 鈫?401
+- Wrong / missing CSRF 鈫?403
+- Wrong Origin 鈫?403
+- After `POST /shutdown` 鈫?connection refused
 
 ### 7.9 Concurrent clients (test_08)
 
@@ -246,34 +246,34 @@ Every endpoint is also exercised against:
   `LMCP_DATA_DIR`.
 - All three call `environment.get` 50 times in interleaved order.
 - Assert: every audit row is recorded, every `run_id` is unique,
-  no row has mismatched `audit_id` ↔ log path.
-- Start the same managed dev server from 3 sessions concurrently —
+  no row has mismatched `audit_id` 鈫?log path.
+- Start the same managed dev server from 3 sessions concurrently 鈥?
   only one wins, the other two get `process_already_running`.
-- Tail a shared log file from 3 sessions — all see the same
+- Tail a shared log file from 3 sessions 鈥?all see the same
   bytes.
 
 ### 7.10 Angular UI (test_09)
 
 Playwright-driven:
 
-- `dashboard` page → status card renders, audit count > 0 after we
+- `dashboard` page 鈫?status card renders, audit count > 0 after we
   make one call.
-- `audit-list` page → table populated, click a row → drill-down
+- `audit-list` page 鈫?table populated, click a row 鈫?drill-down
   renders envelope + meta + log handle.
-- `settings` page → form pre-filled, change one field, refresh,
+- `settings` page 鈫?form pre-filled, change one field, refresh,
   field persists.
-- `rules-list` page → toggle one rule, assert row count +
+- `rules-list` page 鈫?toggle one rule, assert row count +
   reload.
-- `mcp-config` page → both snippets present, copy button works.
-- `automation` page → window list, authorize / revoke, tree
+- `mcp-config` page 鈫?both snippets present, copy button works.
+- `automation` page 鈫?window list, authorize / revoke, tree
   viewer, OCR preview.
 - All pages: screenshot on failure, save to `_report/`.
 
-### 7.11 UI automation — Windows (test_10)
+### 7.11 UI automation 鈥?Windows (test_10)
 
 Real desktop session:
 
-- `ui.list_windows` returns ≥ 1 window.
+- `ui.list_windows` returns 鈮?1 window.
 - `ui.authorize_window` on Calculator (or another always-present
   app) succeeds.
 - `ui.get_ui_tree` returns a tree with `> 0` nodes.
@@ -287,7 +287,7 @@ Real desktop session:
 
 ### 7.12 OCR round-trip (test_11)
 
-- `screenshot_window` of Calculator → PNG.
+- `screenshot_window` of Calculator 鈫?PNG.
 - `ocr.ocr_region` on a known region returns the expected digit
   string (e.g. "0" on the display).
 - `ocr.find_text` against a saved screenshot finds the string.
@@ -296,15 +296,15 @@ Real desktop session:
 
 ### 7.13 Install / uninstall (test_12)
 
-- `python -m localmcptools install --method scheduled-task` →
+- `python -m localmcptools install --method scheduled-task` 鈫?
   `Get-ScheduledTask` lists `LocalMcpTools`.
 - Stop the in-test server, run it via the task, confirm it boots.
-- `python -m localmcptools uninstall` → task gone, server.json
+- `python -m localmcptools uninstall` 鈫?task gone, server.json
   gone, port freed.
 - Same matrix for `--method startup-folder` (the .lnk exists,
   is removed).
 
-### 7.14 Reboot persistence (test_13) — manual gate
+### 7.14 Reboot persistence (test_13) 鈥?manual gate
 
 - Install via scheduled-task with `--auto-start`.
 - Reboot.
@@ -357,7 +357,7 @@ Add a single `scripts/run_e2e.ps1` that:
 
 | Phase | Area | Days | Blocking |
 |---|---|---|---|
-| 1 | Fixtures + helpers + stdio boot | 1 | — |
+| 1 | Fixtures + helpers + stdio boot | 1 | 鈥?|
 | 2 | `test_01` (40 tools over stdio) | 2 | phase 1 |
 | 3 | `test_07` (control plane) | 2 | phase 2 |
 | 4 | `test_05` policy enforcement | 1 | phase 2 |
@@ -379,15 +379,15 @@ on the critical path.
 
 ## 10. CI integration**
 - **Nightly** at 02:00 UTC on Windows runner: `pytest -m "e2e and not e2e_manual and not e2e_admin"`.
-- **On PR** to `main`: smoke subset only — `pytest -m "e2e and (test_00 or test_02_http_smoke or test_07_smoke)"` (≈ 6 tests, < 5 min).
-- **Manual gates** (test_13 + UI accuracy) — fail-open in CI, blocked for release tagging.
+- **On PR** to `main`: smoke subset only 鈥?`pytest -m "e2e and (test_00 or test_02_http_smoke or test_07_smoke)"` (鈮?6 tests, < 5 min).
+- **Manual gates** (test_13 + UI accuracy) 鈥?fail-open in CI, blocked for release tagging.
 
 ## 11. Reporting**
 
-- `_report/junit.xml` — machine-readable per test.
-- `_report/index.html` — generated by `pytest-html` from the junit XML.
-- `_report/screenshots/` — captured on any Playwright failure.
-- `_report/profile.svg` — flamegraph of the slowest 20 e2e tests.
+- `_report/junit.xml` 鈥?machine-readable per test.
+- `_report/index.html` 鈥?generated by `pytest-html` from the junit XML.
+- `_report/screenshots/` 鈥?captured on any Playwright failure.
+- `_report/profile.svg` 鈥?flamegraph of the slowest 20 e2e tests.
 
 ## 12. Risks & mitigations**
 
@@ -411,37 +411,77 @@ on the critical path.
    recorded in `docs/reports/<date>.md`".
 ---
 
+
 ## 14. Progress
 
 | Phase | Status | Tests | Notes |
 |---|---|---|---|
-| 1. Fixtures + helpers + stdio boot | **done** | 8 | committed in d4fe2f8 |
-| 2. 	est_01 (40 tools over stdio) | not started | 0 | next up |
-| 3. 	est_07 (control plane) | not started | 0 | |
-| 4. 	est_05 policy enforcement | not started | 0 | |
-| 5. 	est_06 artifact redaction | not started | 0 | |
-| 6. 	est_03 workspace lifecycle | not started | 0 | |
-| 7. 	est_04 managed process | not started | 0 | |
-| 8. 	est_02 HTTP /mcp | not started | 0 | |
-| 9. 	est_08 concurrency | not started | 0 | |
-| 10. 	est_09 Angular UI | not started | 0 | needs playwright |
-| 11. 	est_10 UI automation | not started | 0 | needs desktop session |
-| 12. 	est_11 OCR | not started | 0 | |
-| 13. 	est_12 install/uninstall | not started | 0 | |
-| 14. 	est_13 reboot persistence | manual gate | �� | |
-| 15. 	est_99 DoD linkage | not started | 0 | |
+| 1. Fixtures + helpers + stdio boot | **done** | 8 | commit d4fe2f8 |
+| 15. DoD linkage framework | **done** | 10 | this commit |
+| 2. `test_01` (40 tools over stdio) | not started | 0 | next up |
+| 3. `test_07` (control plane) | not started | 0 | |
+| 4. `test_05` policy enforcement | not started | 0 | |
+| 5. `test_06` artifact redaction | not started | 0 | |
+| 6. `test_03` workspace lifecycle | not started | 0 | |
+| 7. `test_04` managed process | not started | 0 | |
+| 8. `test_02` HTTP /mcp | not started | 0 | |
+| 9. `test_08` concurrency | not started | 0 | |
+| 10. `test_09` Angular UI | not started | 0 | needs playwright |
+| 11. `test_10` UI automation | not started | 0 | needs desktop session |
+| 12. `test_11` OCR | not started | 0 | |
+| 13. `test_12` install/uninstall | not started | 0 | |
+| 14. `test_13` reboot persistence | manual gate | — | |
 
-**Bugs found and fixed during phase 1 (commit d4fe2f8):**
+### DoD coverage (after phase 15)
 
-* cli.py _cmd_stop used 	askkill /PID /T without /F �� Windows
-  rejects graceful kill of python processes that hold a console handle
-  or sit in a JOB object. Added /F and unlink(server.json) after
-  success so subsequent start doesn't trip the staleness guard.
-* subprocess.Popen.pid on Python 3.14 Windows is unreliable (the
+```
+change                           covered  pending  deferred
+------------------------------------------------------------
+angular-ui-foundation                  5       11         0
+bootstrap-mcp-server                   2        0         4
+core-shell-and-audit                   4        0         1
+extended-tools-and-packaging           1        7         7
+policy-and-safety                      1        2         2
+ui-automation-and-ocr                  1       13         5
+------------------------------------------------------------
+TOTAL                                 14       33        19
+```
+
+The framework reports these numbers on every `pytest -m e2e` run
+via `test_unregistered_unchecked_is_documented`. Once a phase closes,
+the relevant entries flip from `pending` to `covered` (and
+the framework refuses to accept a `test_id` that no longer exists).
+
+### Bugs found and fixed during phase 1 (commit d4fe2f8)
+
+* `cli.py _cmd_stop` used `taskkill /PID /T` without `/F`. Windows
+  rejects graceful kill of python processes that hold a console
+  handle or sit in a JOB object. Added `/F` and `unlink(server.json)`
+  after success so subsequent `start` doesn't trip the staleness
+  guard.
+* `subprocess.Popen.pid` on Python 3.14 Windows is unreliable (the
   handle doesn't track the actual child pid). Fixture uses
-  meta["pid"] from server.json instead.
-* /api/status returns its dict directly (no universal envelope).
-  Updated test to assert against ody["server"]["transport"] and
-  ody["server"]["audit_db_initialised"].
-* Schema version lives in a schema_version table, not
-  PRAGMA user_version. Test updated.
+  `meta["pid"]` from `server.json` instead.
+* `/api/status` returns its dict directly (no universal envelope).
+  Test updated to assert against `body["server"]["transport"]` and
+  `body["server"]["audit_db_initialised"]`.
+* Schema version lives in a `schema_version` table, not
+  `PRAGMA user_version`. Test updated.
+
+### How the framework works
+
+* `tests/e2e/dod_registry.py` declares every DoD item with
+  `(change, section, item, status, test_id?, reason?)`.
+* `python -m tests.e2e.dod_registry` prints a coverage report from
+  the CLI without running pytest.
+* `tests/e2e/test_99_dod_checklist.py` is a parametric test that:
+  - confirms every `covered` entry points at a real pytest id
+    (errors — not fails — when a test was renamed and the registry
+    wasn't updated, so coverage gaps are loud),
+  - validates registry shape (every `covered` has a `test_id`,
+    every `deferred` has a `reason`, no unknown statuses, no
+    duplicates within a (change, section) pair),
+  - surfaces `pending` and unregistered items in test output so CI
+    dashboards can show progress,
+  - emits one test per change asserting "≥ 1 covered entry" so
+    every change must have at least one e2e proof in the registry.
