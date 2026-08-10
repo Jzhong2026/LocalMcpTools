@@ -15,9 +15,11 @@ from . import (
     diagnostics,
     environment,
     fs,
+    ocr,
     output,
     process,
     runtime,
+    ui,
     vscode,
     workspace,
 )
@@ -26,9 +28,11 @@ __all__ = [
     "diagnostics",
     "environment",
     "fs",
+    "ocr",
     "output",
     "process",
     "runtime",
+    "ui",
     "vscode",
     "workspace",
 ]

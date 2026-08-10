@@ -41,5 +41,12 @@ export const APP_ROUTES: Routes = [
         (m) => m.McpConfigComponent,
       ),
   },
+  {
+    path: 'automation',
+    loadComponent: () =>
+      import('./features/automation/automation.component').then(
+        (m) => m.AutomationComponent,
+      ),
+  },
   { path: '**', redirectTo: 'dashboard' },
 ];

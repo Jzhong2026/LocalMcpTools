@@ -33,7 +33,7 @@ its specs are reflected in the running server.
 | 3 | `policy-and-safety` | 2 | Server-side authority + approval | done |
 | 4 | `managed-process-and-ports` | 3 | Managed dev server + port queries | done |
 | 5 | `angular-ui-foundation` | 4 | Local browser UI for audit + settings | done *(live browser smoke-test owed)* |
-| 6 | `ui-automation-and-ocr` | 5 | UIA + OCR-backed UI verification | proposed |
+| 6 | `ui-automation-and-ocr` | 5 | UIA + OCR-backed UI verification | done *(live Windows spike accuracy numbers owed)* |
 | 7 | `extended-tools-and-packaging` | 6 + 7 + 8 | Diagnostic extras, packaging, cross-agent verify | done *(reboot smoke-test owed)* |
 
 ## Dependency Graph

@@ -386,6 +386,47 @@ async def backgrounds_stop(process_id: str) -> dict[str, Any]:
     return stopped.as_dict()
 
 
+# --- /windows -------------------------------------------------------------
+
+
+@router.get("/windows")
+async def windows_list() -> dict[str, Any]:
+    """List visible top-level windows (credential windows filtered)."""
+    from .ui.windows import list_windows
+
+    return {"windows": [w.__dict__ for w in list_windows()]}
+
+
+@router.post("/windows/authorize")
+async def windows_authorize(body: dict[str, Any]) -> dict[str, Any]:
+    """Authorize a window for ui.* / ocr.* calls."""
+    from .ui.windows import authorize
+
+    hwnd = body.get("hwnd")
+    if not isinstance(hwnd, int):
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "invalid_args", "message": "hwnd must be an integer"},
+        )
+    ttl_ms = int(body.get("ttl_ms", 60 * 60 * 1000))
+    row = authorize(
+        hwnd=hwnd,
+        process=str(body.get("process", "")),
+        pid=int(body.get("pid", 0)),
+        title=str(body.get("title", "")),
+        ttl_ms=ttl_ms,
+    )
+    return {"window": row.__dict__}
+
+
+@router.post("/windows/{window_id}/revoke")
+async def windows_revoke(window_id: str) -> dict[str, Any]:
+    """Revoke an authorised window."""
+    from .ui.windows import revoke
+
+    return {"revoked": revoke(window_id=window_id)}
+
+
 # --- /mcp-config-snippet --------------------------------------------------
 
 

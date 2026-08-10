@@ -101,4 +101,8 @@ export class ApiService {
       this.http.post<{ ok: boolean; message: string }>('/api/shutdown', {}),
     );
   }
+
+  uiScreenshotWindow(body: { window_id: string }): Promise<unknown> {
+    return firstValueFrom(this.http.post('/api/ui/screenshot/window', body));
+  }
 }

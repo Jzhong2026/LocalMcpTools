@@ -5,8 +5,8 @@ A local Model Context Protocol (MCP) toolset for VS Code agents
 
 ## Status
 
-**Phase 4 (`angular-ui-foundation`) backend + Angular skeleton complete**;
-UI-automation and OCR remain in later changes.
+**Phases 0-6 (`ui-automation-and-ocr`) code-complete.** Live spike
+accuracy numbers + the cross-agent live hand-off check still owed.
 
 What's shipped:
 
@@ -28,19 +28,28 @@ What's shipped:
   with the server.
 - **HTTP control plane**: `localmcptools start --http` boots a FastAPI app
   on `127.0.0.1:7890` (configurable) with Origin allowlist, CSRF
-  double-submit, bearer auth for `/mcp`, and 14 control endpoints
+  double-submit, bearer auth for `/mcp`, and 16 control endpoints
   (`/api/status`, `/api/audit`, `/api/rules`, `/api/backgrounds`,
-  `/api/settings`, `/api/mcp-config-snippet`, `/api/shutdown`, ...).
-- **Angular SPA**: Dashboard / Audit / Settings / Rules / MCP-config
-  pages under `ui/`. Build with `scripts/build_frontend.bat`; the bundle
-  lands in `src/localmcptools/ui_assets/` and is served at `/ui/`.
+  `/api/settings`, `/api/mcp-config-snippet`, `/api/windows/*`,
+  `/api/shutdown`, ...).
+- **Angular SPA**: Dashboard / Audit / Settings / Rules / MCP-config /
+  Automation pages under `ui/`. Build with `scripts/build_frontend.bat`;
+  the bundle lands in `src/localmcptools/ui_assets/` and is served at `/ui/`.
+- **UI automation + OCR**: `ui.list_windows / authorize_window /
+  get_ui_tree / find_element / screenshot_{window,full,region} /
+  click_element / type_text / act_and_verify` and
+  `ocr.ocr_region / find_text / assert_text` with a Windows OCR
+  provider that falls back to a stub on hosts without `winsdk`.
+  Verification harness (UIA / screenshot / OCR predicates).
 - **Packaging**: `localmcptools install [--method scheduled_task|startup_folder]`
   registers a user-level (no admin) Windows scheduled task; `uninstall`
   removes it. Idempotent.
 
-What's still open: UI Automation + OCR (`ui-automation-and-ocr`), and
-the live cross-agent hand-off check for `workbuddy` / `minimax code`.
-See [`openspec/changes/`](openspec/changes/) for the contracts and
+What's still owed: live Windows OCR accuracy spike (provider ships but
+real numbers haven't been measured yet), the cross-agent live
+hand-off check for `workbuddy` / `minimax code`, and the Windows reboot
+smoke test for the scheduled task. See
+[`openspec/changes/`](openspec/changes/) for the contracts and
 [`docs/implementation-plan.md`](docs/implementation-plan.md) for the full
 roadmap.
 

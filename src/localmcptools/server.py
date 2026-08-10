@@ -42,10 +42,12 @@ from .tools import (
     diagnostics,
     environment,
     fs,
+    ocr,
     output,
     process,
     runtime,
     shell,
+    ui,
     vscode,
     workspace,
 )
@@ -333,6 +335,94 @@ def _register_tools(service: ToolExecutionService) -> None:
         title="Explain a single run",
         description="Classify a prior run_id, pull key evidence, and emit next_actions.",
         param_names=("run_id", "row"),
+    )
+
+    # --- UI automation (change-6) ---
+    wrappers["ui.list_windows"] = service.register(
+        "ui.list_windows", ui.ui_list_windows,
+        title="List visible top-level windows",
+        description="Read-only window enumeration. Credential windows are filtered out.",
+        param_names=(),
+    )
+    wrappers["ui.authorize_window"] = service.register(
+        "ui.authorize_window", ui.ui_authorize_window,
+        title="Authorize a window for UI automation",
+        description="Persist a window_id UUID for subsequent ui.* / ocr.* calls. Default TTL: 60 minutes.",
+        param_names=("hwnd", "title", "process", "pid", "ttl_ms"),
+    )
+    wrappers["ui.revoke_window"] = service.register(
+        "ui.revoke_window", ui.ui_revoke_window,
+        title="Revoke an authorised window",
+        description="Invalidate a previously-authorised window_id immediately.",
+        param_names=("window_id",),
+    )
+    wrappers["ui.get_ui_tree"] = service.register(
+        "ui.get_ui_tree", ui.ui_get_ui_tree,
+        title="Read the UIA tree of a window",
+        description="Structured UIA tree; >500 nodes spill to an artifact.",
+        param_names=("window_id", "depth"),
+    )
+    wrappers["ui.find_element"] = service.register(
+        "ui.find_element", ui.ui_find_element,
+        title="Find a UI element by criterion",
+        description="AND combination of text / automationId / controlType / name. Top 20 matches with score.",
+        param_names=("window_id", "text", "automationId", "controlType", "name", "max_results"),
+    )
+    wrappers["ui.screenshot_window"] = service.register(
+        "ui.screenshot_window", ui.ui_screenshot_window,
+        title="Screenshot an authorised window",
+        description="Capture window pixels; returned as an artifact handle. Rate-limited 20/min.",
+        param_names=("window_id",),
+    )
+    wrappers["ui.screenshot_full"] = service.register(
+        "ui.screenshot_full", ui.ui_screenshot_full,
+        title="Screenshot the full desktop",
+        description="Capture all monitors; returned as an artifact handle. Rate-limited 20/min.",
+        param_names=(),
+    )
+    wrappers["ui.screenshot_region"] = service.register(
+        "ui.screenshot_region", ui.ui_screenshot_region,
+        title="Screenshot a rectangular region",
+        description="Capture a region {x,y,width,height}; returned as an artifact handle. Rate-limited 20/min.",
+        param_names=("region",),
+    )
+    wrappers["ui.click_element"] = service.register(
+        "ui.click_element", ui.ui_click_element,
+        title="Click inside an authorised window",
+        description="Click at window-local (x, y) after a verification predicate has been registered.",
+        param_names=("workspace_id", "window_id", "x", "y", "button", "verify_with", "approval_id"),
+    )
+    wrappers["ui.type_text"] = service.register(
+        "ui.type_text", ui.ui_type_text,
+        title="Type text into an authorised window",
+        description="Type after a verification predicate has been registered.",
+        param_names=("workspace_id", "window_id", "text", "interval_ms", "verify_with", "approval_id"),
+    )
+    wrappers["ui.act_and_verify"] = service.register(
+        "ui.act_and_verify", ui.ui_act_and_verify,
+        title="Atomic action + verification",
+        description="Single audit row containing both the action and the verification report.",
+        param_names=("workspace_id", "action_type", "action_args", "verify_with", "approval_id"),
+    )
+
+    # --- OCR (change-6) ---
+    wrappers["ocr.ocr_region"] = service.register(
+        "ocr.ocr_region", ocr.ocr_ocr_region,
+        title="Run OCR over an authorised window or screenshot",
+        description="Structured OCR blocks with bounding boxes + confidence. Provider falls back to a stub on hosts without Windows OCR.",
+        param_names=("window_id", "screenshot_handle", "region"),
+    )
+    wrappers["ocr.find_text"] = service.register(
+        "ocr.find_text", ocr.ocr_find_text,
+        title="Search OCR output for a string",
+        description="Returns matched blocks with bounding boxes; supports contains / exact / regex.",
+        param_names=("window_id", "screenshot_handle", "query", "match", "fuzzy"),
+    )
+    wrappers["ocr.assert_text"] = service.register(
+        "ocr.assert_text", ocr.ocr_assert_text,
+        title="Assert OCR text contains a string",
+        description="Returns passed:false whenever uncertainty is high; never lies about OCR results.",
+        param_names=("window_id", "screenshot_handle", "expected", "match"),
     )
 
     # Attach the wrappers to the service so _build_fast_mcp can pull

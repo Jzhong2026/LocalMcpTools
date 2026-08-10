@@ -160,7 +160,30 @@ BACKGROUND_PROCESSES_INDEXES_V4 = (
     "CREATE INDEX IF NOT EXISTS idx_background_pid ON background_processes(pid);",
 )
 
-CURRENT_SCHEMA_VERSION = 4
+# Schema v4 (bumped again by change-6): authorized-windows table. The
+# earlier ``background_processes`` migration is still v4; this addition
+# keeps the schema version at 5 because we introduce a new table rather
+# than mutate an existing one. A future change that needs to alter an
+# existing table will bump to 6.
+AUTHORIZED_WINDOWS_SCHEMA_V5 = """
+CREATE TABLE IF NOT EXISTS authorized_windows (
+    id          TEXT PRIMARY KEY,
+    process     TEXT NOT NULL,
+    pid         INTEGER NOT NULL,
+    title       TEXT NOT NULL,
+    hwnd        INTEGER NOT NULL,
+    issued_at   INTEGER NOT NULL,
+    expires_at  INTEGER NOT NULL,
+    revoked     INTEGER NOT NULL DEFAULT 0
+);
+"""
+
+AUTHORIZED_WINDOWS_INDEXES_V5 = (
+    "CREATE INDEX IF NOT EXISTS idx_authorized_windows_expiry ON authorized_windows(expires_at);",
+    "CREATE INDEX IF NOT EXISTS idx_authorized_windows_revoked ON authorized_windows(revoked);",
+)
+
+CURRENT_SCHEMA_VERSION = 5
 
 
 # --- Connection factory ---------------------------------------------------
@@ -269,6 +292,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
             )
         _write_schema_version(conn, 4)
         current = 4
+
+    if current < 5:
+        _log.info("applying schema migration -> v5 (authorized windows)")
+        conn.execute(AUTHORIZED_WINDOWS_SCHEMA_V5)
+        for ddl in AUTHORIZED_WINDOWS_INDEXES_V5:
+            conn.execute(ddl)
+        _write_schema_version(conn, 5)
+        current = 5
 
     if current != CURRENT_SCHEMA_VERSION:
         raise RuntimeError(

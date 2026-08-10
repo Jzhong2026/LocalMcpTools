@@ -39,6 +39,13 @@ dependencies = [
     "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.32,<1",
     "httpx>=0.27,<1",
+    # change-6 (ui-automation-and-ocr): UIA + screenshots + OCR.
+    "uiautomation>=2.0,<3",
+    "Pillow>=10.0,<12",
+    # winsdk is the Windows OCR provider. Optional because the spike
+    # runs without it; the package falls back to a stub provider
+    # that emits ``uncertain=True`` results.
+    "winsdk>=1.0; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
