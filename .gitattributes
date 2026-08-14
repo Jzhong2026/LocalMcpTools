@@ -1,0 +1,18 @@
+# Enforce CRLF line endings for Windows-targeted source files.
+# This is a Windows-only project (.ps1, .bat, .py on Windows runners);
+# the dev profile uses core.autocrlf=true, but explicit attrs prevent
+# LF-only files from sneaking in when the autocrlf config drifts or
+# when a contributor clones with a different setting.
+*.ps1     text eol=crlf
+*.bat     text eol=crlf
+*.cmd     text eol=crlf
+*.py      text eol=crlf
+*.psm1    text eol=crlf
+*.txt     text eol=crlf
+
+# Documentation & config that we want to keep platform-neutral.
+*.md      text eol=lf
+*.json    text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.toml    text eol=lf

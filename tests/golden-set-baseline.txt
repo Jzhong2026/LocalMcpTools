@@ -1,7 +1,7 @@
-﻿== golden-smoke against http://127.0.0.1:7890 ==
+﻿== golden-smoke against http://127.0.0.1:62221 ==
 
 [environment.get] ok=True  os={'name': 'nt', 'version': '10.0.26200', 'build': '11', 'architecture': 'AMD64'}
-  {"ok": true, "data": {"os": {"name": "nt", "version": "10.0.26200", "build": "11", "architecture": "AMD64"}, "powershell": {"version": "5.1.26100.8875", "edition": "Desktop", "executable": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"}, "encoding": {"active_code_page": 65001, "console_output": "unknown", "preferred_fs": "utf-8"}, "user": {"name": "Transfinder", "is_admin": false
+  {"ok": true, "data": {"os": {"name": "nt", "version": "10.0.26200", "build": "11", "architecture": "AMD64"}, "powershell": {"version": "5.1.26100.9168", "edition": "Desktop", "executable": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"}, "encoding": {"active_code_page": 65001, "console_output": "unknown", "preferred_fs": "utf-8"}, "user": {"name": "Transfinder", "is_admin": true}
 
 [runtime.detect_runtime] ok=True  python=[{'version': 'Python 3.14.3', 'path': 'C:\\Users\\jason\\AppData\\Local\\Python\\bin\\python.exe', 'is_default': True}, {'version': 'Python 3.13.13', 'path': 'C:\\Users\\jason\\AppData\\Local\\Programs\\Python\\Python313\\python.exe', 'is_default': False}]
   {"ok": true, "data": {"python": [{"version": "Python 3.14.3", "path": "C:\\Users\\jason\\AppData\\Local\\Python\\bin\\python.exe", "is_default": true}, {"version": "Python 3.13.13", "path": "C:\\Users\\jason\\AppData\\Local\\Programs\\Python\\Python313\\python.exe", "is_default": false}], "node": [{"version": "v20.19.6", "path": "C:\\Users\\jason\\AppData\\Local\\nvm\\v20.19.6\\node.exe", "is_defa
@@ -10,24 +10,24 @@
   {"ok": true, "data": {"sections": {"git": {"status": "not_a_repo"}, "runtime": {"python": [{"version": "Python 3.14.3", "path": "C:\\Users\\jason\\AppData\\Local\\Python\\bin\\python.exe", "is_default": true}, {"version": "Python 3.13.13", "path": "C:\\Users\\jason\\AppData\\Local\\Programs\\Python\\Python313\\python.exe", "is_default": false}], "node": [{"version": "v20.19.6", "path": "C:\\Users\
 
 [process.list_listening_ports] ok=True  {"ports": [{"port": 80, "address": "0.0.0.0", "protocol": "tcp", "pid": 4, "managed_id": null}, {"port": 80, "address": 
-  {"ok": true, "data": {"ports": [{"port": 80, "address": "0.0.0.0", "protocol": "tcp", "pid": 4, "managed_id": null}, {"port": 80, "address": "::", "protocol": "tcp", "pid": 4, "managed_id": null}, {"port": 135, "address": "0.0.0.0", "protocol": "tcp", "pid": 2092, "managed_id": null}, {"port": 135, "address": "::", "protocol": "tcp", "pid": 2092, "managed_id": null}, {"port": 139, "address": "192.
+  {"ok": true, "data": {"ports": [{"port": 80, "address": "0.0.0.0", "protocol": "tcp", "pid": 4, "managed_id": null}, {"port": 80, "address": "::", "protocol": "tcp", "pid": 4, "managed_id": null}, {"port": 135, "address": "0.0.0.0", "protocol": "tcp", "pid": 1200, "managed_id": null}, {"port": 135, "address": "::", "protocol": "tcp", "pid": 1200, "managed_id": null}, {"port": 139, "address": "172.
 
 [process.list_managed] ok=True  {"processes": []}
-  {"ok": true, "data": {"processes": []}, "meta": {"tool": "process.list_managed", "duration_ms": 21, "audit_id": "73a9e5b8-5e94-4346-92ba-866b0c9566eb", "log_path": null, "run_id": "d9ecf8f9-5422-492a-a471-8581fee16ad8", "output_handle": null, "workspace_id": null, "evidence_handle": null, "next_actions": []}, "error": null}
+  {"ok": true, "data": {"processes": []}, "meta": {"tool": "process.list_managed", "duration_ms": 11, "audit_id": "081ac205-9e57-4912-a5d2-2e5283026fd8", "log_path": null, "run_id": "d9085282-986f-48e0-9b5f-5a18c1002346", "output_handle": null, "workspace_id": null, "evidence_handle": null, "next_actions": []}, "error": null}
 
-[workspace.register (repo root)] ok=True  workspace_id='bd0d2f05f76843c7a40ef750daebf098'
-  {"ok": true, "data": {"workspace_id": "bd0d2f05f76843c7a40ef750daebf098", "canonical_root": "D:\\AI\\Projects\\LocalMcpTools", "profile": "observe"}, "meta": {"tool": "workspace.register", "duration_ms": 22, "audit_id": "085f5044-be53-4f00-9eba-90d2f57cf4ec", "log_path": null, "run_id": "027d890e-157e-48ce-9b9f-681a469c99dc", "output_handle": null, "workspace_id": null, "evidence_handle": null, "n
+[workspace.register (repo root)] ok=True  workspace_id='bbc04a11d9d54095addf34434e8fd647'
+  {"ok": true, "data": {"workspace_id": "bbc04a11d9d54095addf34434e8fd647", "canonical_root": "D:\\AI\\Projects\\LocalMcpTools", "profile": "observe"}, "meta": {"tool": "workspace.register", "duration_ms": 10, "audit_id": "bf2ddfb1-42e2-4c54-be36-919fbf700159", "log_path": null, "run_id": "f8c43d1c-4e5e-4a31-8fc0-3c85facddc56", "output_handle": null, "workspace_id": null, "evidence_handle": null, "n
 
-[workspace.inspect] ok=True  workspace_id='bd0d2f05f76843c7a40ef750daebf098'
-  {"ok": true, "data": {"project_type": "python", "git": {"status": "dirty", "head": "1cb476c", "branch": "main"}, "presets_available": ["test", "build", "lint", "dev_server"], "runtimes": [{"name": "python", "version": "Python 3.14.3", "path": "C:\\Users\\jason\\AppData\\Local\\Python\\bin\\python.EXE"}, {"name": "node", "version": "v20.19.6", "path": "C:\\nvm4w\\nodejs\\node.EXE"}, {"name": "npm",
+[workspace.inspect] ok=True  workspace_id='bbc04a11d9d54095addf34434e8fd647'
+  {"ok": true, "data": {"project_type": "python", "git": {"status": "dirty", "head": "dd32950", "branch": "main"}, "presets_available": ["test", "build", "lint", "dev_server"], "runtimes": [{"name": "python", "version": "Python 3.14.3", "path": "C:\\Users\\jason\\AppData\\Local\\Python\\bin\\python.EXE"}, {"name": "node", "version": "v20.19.6", "path": "C:\\nvm4w\\nodejs\\node.EXE"}, {"name": "npm",
 
-[workspace.search_text 'Mavis'] ok=True  {"matches": [{"file": "scripts\\golden-smoke.py", "line": 87, "text": "                    \"workspace.search_text 'Mavi
-  {"ok": true, "data": {"matches": [{"file": "scripts\\golden-smoke.py", "line": 87, "text": "                    \"workspace.search_text 'Mavis'\","}, {"file": "scripts\\golden-smoke.py", "line": 90, "text": "                        {\"workspace_id\": ws_id, \"pattern\": \"Mavis\", \"max_results\": 3},"}], "skipped": [{"file": "D:\\AI\\Projects\\LocalMcpTools\\err.log", "reason": "binary"}, {"file"
+[workspace.search_text 'Mavis'] ok=True  {"matches": [{"file": "scripts\\golden-smoke.py", "line": 122, "text": "                    \"workspace.search_text 'Mav
+  {"ok": true, "data": {"matches": [{"file": "scripts\\golden-smoke.py", "line": 122, "text": "                    \"workspace.search_text 'Mavis'\","}, {"file": "scripts\\golden-smoke.py", "line": 126, "text": "                        {\"workspace_id\": ws_id, \"pattern\": \"Mavis\", \"max_results\": 3},"}, {"file": "tests\\golden-set-baseline.txt", "line": 23, "text": "[workspace.search_text 'Mavi
 
 [fs.read_range README.md (first 10 lines)] ok=True  {"lines": ["# LocalMcpTools", "", "A local Model Context Protocol (MCP) toolset for VS Code agents", "(codebuddy, GitHub
   {"ok": true, "data": {"lines": ["# LocalMcpTools", "", "A local Model Context Protocol (MCP) toolset for VS Code agents", "(codebuddy, GitHub Copilot, and others).", "", "## Status", "", "**Phases 0-6 (`ui-automation-and-ocr`) code-complete.** E2E test", "suite covers phases 1, 2, 3, 4, 5, 6, 7, 8, 9 (243 tests, ~4 min).", "Live spike accuracy numbers + the cross-agent live hand-off"], "total_line
 
 [workspace.inspect (bad id) -> expect ok=false] ok=False  {"code": "workspace_not_registered", "message": "workspace_id='nope-not-real' is not registered", "suggestion": "list_wo
-  {"ok": false, "data": null, "meta": {"tool": "workspace.inspect", "duration_ms": 21, "audit_id": "55b262bd-1078-4e63-97de-bb86dae6da9e", "log_path": null, "run_id": "2fa98afa-cbb9-4096-b5b9-a2a3ee12a81e", "output_handle": null, "workspace_id": null, "evidence_handle": null, "next_actions": []}, "error": {"code": "workspace_not_registered", "message": "workspace_id='nope-not-real' is not registered
+  {"ok": false, "data": null, "meta": {"tool": "workspace.inspect", "duration_ms": 21, "audit_id": "f1d2c80c-eb0e-47de-9c1a-b524b6fc275c", "log_path": null, "run_id": "9d686b15-0f0a-451b-8cea-11653aa21b1a", "output_handle": null, "workspace_id": null, "evidence_handle": null, "next_actions": []}, "error": {"code": "workspace_not_registered", "message": "workspace_id='nope-not-real' is not registered
 
 == done ==

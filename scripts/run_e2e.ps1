@@ -33,22 +33,16 @@ Push-Location $repoRoot
 try {
     New-Item -ItemType Directory -Path $ReportDir -Force | Out-Null
 
-    $markerFilter = "e2e"
-    if (-not $IncludeUnit) {
-        $markerFilter = "e2e"
-    } else {
-        # Include both: deselect nothing
-        $markerFilter = $null
-    }
-
-    $junitPath = Join-Path $ReportDir "junit.xml"
-
+    # IncludeUnit=True -> run everything (no -m filter).
+    # IncludeUnit=False (default) -> -m e2e only.
     $pytestArgs = @(
         $TestPath,
-        "-m", "e2e",
-        "--junitxml", $junitPath,
+        "--junitxml", (Join-Path $ReportDir "junit.xml"),
         "--tb=short"
     )
+    if (-not $IncludeUnit) {
+        $pytestArgs += @("-m", "e2e")
+    }
     if ($VerboseOutput) {
         $pytestArgs += "-vv"
     }

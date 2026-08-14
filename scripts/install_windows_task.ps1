@@ -1,7 +1,7 @@
 # install_windows_task.ps1
 #
 # Registers a *user-level* (no admin required) Windows Scheduled Task
-# that boots the LocalMcpTools stdio server at user logon.
+# that boots the LocalMcpTools server at user logon.
 #
 # Idempotent: if the task already exists it is replaced.
 #
@@ -9,12 +9,17 @@
 #   -ProjectRoot       : path to the repo checkout (default: parent of script)
 #   -PythonExecutable  : python interpreter to use (default: python on PATH)
 #   -TaskName          : scheduled task name (default: LocalMcpTools)
+#   -HttpMode          : boot the HTTP control plane + MCP endpoint (default)
+#                        instead of stdio. Pass -HttpMode:$false for stdio.
+#   -HttpPort          : bind port for -HttpMode (default: 7890)
 
 [CmdletBinding()]
 param(
     [string]$ProjectRoot = (Resolve-Path "$PSScriptRoot\..").Path,
     [string]$PythonExecutable = "python",
-    [string]$TaskName = "LocalMcpTools"
+    [string]$TaskName = "LocalMcpTools",
+    [bool]$HttpMode = $true,
+    [int]$HttpPort = 7890
 )
 
 $ErrorActionPreference = 'Stop'
@@ -34,8 +39,18 @@ if (-not (Test-Path $ProjectRoot)) {
     exit 3
 }
 
-# Build the action: `python -m localmcptools start` from the project root.
-$actionArgs = "-m localmcptools start"
+# Build the action: `python -m localmcptools start [--http --port N]` from
+# the project root. HTTP mode is the default because it matches the
+# apply-mcp-config.ps1 integration path.
+if ($HttpMode) {
+    $actionArgs = "-m localmcptools start --http --port $HttpPort"
+    $modeDesc = "http://127.0.0.1:$HttpPort"
+}
+else {
+    $actionArgs = "-m localmcptools start"
+    $modeDesc = "stdio"
+}
+
 $Action = New-ScheduledTaskAction `
     -Execute $PythonExecutable `
     -Argument $actionArgs `
@@ -45,6 +60,9 @@ $Action = New-ScheduledTaskAction `
 $Trigger = New-ScheduledTaskTrigger -AtLogOn
 
 # Settings: battery-friendly + retry on transient failure.
+# ExecutionTimeLimit = 0 (New-TimeSpan -Minutes 0) means "unbounded" —
+# the server is a long-lived process so we never want the task
+# scheduler to kill it on a timer.
 $Settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
@@ -74,10 +92,19 @@ catch {
     exit 4
 }
 
+# Verify the registration actually landed (defensive — Register-ScheduledTask
+# can swallow non-fatal errors).
+$verify = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+if (-not $verify) {
+    Write-Error "Register-ScheduledTask reported success but task '$TaskName' is not visible to Get-ScheduledTask."
+    exit 5
+}
+
 Write-Host "[localmcptools] scheduled task '$TaskName' is now active."
 Write-Host "  Trigger:  AtLogOn"
 Write-Host "  Action:   $PythonExecutable $actionArgs"
 Write-Host "  CWD:      $ProjectRoot"
+Write-Host "  Mode:     $modeDesc"
 Write-Host ""
 Write-Host "Test it manually with:  schtasks /Run /TN $TaskName"
 exit 0
