@@ -6,6 +6,8 @@
 # (e.g. on a corporate image where the user lacks TaskScheduler
 # privileges).
 #
+# Supports -WhatIf / -Confirm.
+#
 # Parameters (all optional):
 #   -ProjectRoot       : path to the repo checkout (default: parent of script)
 #   -PythonExecutable  : python interpreter to use (default: python on PATH)
@@ -14,31 +16,39 @@
 #                        instead of stdio. Pass -HttpMode:$false for stdio.
 #   -HttpPort          : bind port for -HttpMode (default: 7890)
 
-[CmdletBinding()]
+[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
 param(
     [string]$ProjectRoot = (Resolve-Path "$PSScriptRoot\..").Path,
     [string]$PythonExecutable = "python",
-    [string]$TaskName = "LocalMcpTools",
+    # NOTE: TaskName / HttpMode / HttpPort defaults below MUST stay in
+    # sync with the values in scripts/_lib.ps1 (DefaultTaskName,
+    # DefaultHttpMode, DefaultHttpPort). PowerShell evaluates param
+    # defaults before dot-sourcing _lib.ps1, so we can't reference
+    # the script-scoped constants directly here.
+    [string]$TaskName = 'LocalMcpTools',
     [bool]$HttpMode = $true,
     [int]$HttpPort = 7890
 )
 
-$ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot '_lib.ps1')
 
-if ($env:OS -ne "Windows_NT") {
-    Write-Error "install_startup_folder.ps1 only runs on Windows."
-    exit 2
-}
+Assert-Windows
 
 $startup = [Environment]::GetFolderPath('Startup')
 if (-not $startup) {
-    Write-Error "Could not resolve the Startup folder path."
-    exit 3
+    Write-Log "Could not resolve the Startup folder path." -Level error
+    exit $script:EXIT_BAD_ENV
 }
 
 # .lnk filename MUST stay in sync with uninstall_windows_task.ps1
-# which removes "$TaskName.lnk". If you change one, change the other.
+# which removes "$TaskName.lnk". The name itself is governed by
+# Get-DefaultTaskName in _lib.ps1, so both installers and the
+# uninstaller stay in lock-step.
 $lnkPath = Join-Path $startup "$TaskName.lnk"
+
+if (-not $PSCmdlet.ShouldProcess($lnkPath, "create shortcut")) {
+    return
+}
 
 # Build the command line. We use cmd.exe to launch python with the
 # project root as CWD, mirroring the scheduled-task action. The
@@ -69,11 +79,11 @@ $shortcut.Save()
 # Verify the .lnk actually landed. CreateShortcut.Save() can return
 # without raising on a permission failure.
 if (-not (Test-Path $lnkPath)) {
-    Write-Error "Shortcut Save() reported success but '$lnkPath' does not exist."
-    exit 4
+    Write-Log "Shortcut Save() reported success but '$lnkPath' does not exist." -Level error
+    exit $script:EXIT_VERIFY_FAILED
 }
 
-Write-Host "[localmcptools] Startup-folder shortcut installed at:"
-Write-Host "  $lnkPath"
-Write-Host "  Mode: $modeDesc"
-exit 0
+Write-Log "Startup-folder shortcut installed at:"
+Write-Log "  $lnkPath"
+Write-Log "  Mode: $modeDesc"
+exit $script:EXIT_OK

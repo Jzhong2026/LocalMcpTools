@@ -5,6 +5,9 @@
 #
 # Idempotent: if the task already exists it is replaced.
 #
+# Supports -WhatIf / -Confirm (PSShouldProcess): the dry run prints
+# every action without actually mutating state.
+#
 # Parameters (all optional; sensible defaults match the developer setup):
 #   -ProjectRoot       : path to the repo checkout (default: parent of script)
 #   -PythonExecutable  : python interpreter to use (default: python on PATH)
@@ -13,34 +16,34 @@
 #                        instead of stdio. Pass -HttpMode:$false for stdio.
 #   -HttpPort          : bind port for -HttpMode (default: 7890)
 
-[CmdletBinding()]
+[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
 param(
     [string]$ProjectRoot = (Resolve-Path "$PSScriptRoot\..").Path,
     [string]$PythonExecutable = "python",
-    [string]$TaskName = "LocalMcpTools",
+    # NOTE: TaskName / HttpMode / HttpPort defaults below MUST stay in
+    # sync with the values in scripts/_lib.ps1 (DefaultTaskName,
+    # DefaultHttpMode, DefaultHttpPort). PowerShell evaluates param
+    # defaults before dot-sourcing _lib.ps1, so we can't reference
+    # the script-scoped constants directly here.
+    [string]$TaskName = 'LocalMcpTools',
     [bool]$HttpMode = $true,
     [int]$HttpPort = 7890
 )
 
-$ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot '_lib.ps1')
 
-# Defensive: refuse to run on a non-Windows host (the script is
-# launched from Python's `localmcptools install` which already gates
-# on os.name == "nt", but belt + braces.)
-if ($env:OS -ne "Windows_NT") {
-    Write-Error "install_windows_task.ps1 only runs on Windows."
-    exit 2
+Assert-Windows
+
+if (-not $PSCmdlet.ShouldProcess("scheduled task '$TaskName' on $ProjectRoot", "register")) {
+    return
 }
-
-Write-Host "[localmcptools] registering scheduled task '$TaskName'..."
 
 if (-not (Test-Path $ProjectRoot)) {
-    Write-Error "ProjectRoot not found: $ProjectRoot"
-    exit 3
+    Write-Log "ProjectRoot not found: $ProjectRoot" -Level error
+    exit $script:EXIT_BAD_INPUT
 }
 
-# Build the action: `python -m localmcptools start [--http --port N]` from
-# the project root. HTTP mode is the default because it matches the
+# Build the action. HTTP mode is the default because it matches the
 # apply-mcp-config.ps1 integration path.
 if ($HttpMode) {
     $actionArgs = "-m localmcptools start --http --port $HttpPort"
@@ -71,40 +74,45 @@ $Settings = New-ScheduledTaskSettingsSet `
     -ExecutionTimeLimit (New-TimeSpan -Minutes 0) `
     -MultipleInstances IgnoreNew
 
-# If the task already exists, replace it.
+# Replace any existing task with the same name (idempotent).
 $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($existing) {
-    Write-Host "[localmcptools] removing existing task '$TaskName' before re-registering."
-    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+    Write-Log "removing existing task '$TaskName' before re-registering."
+    if ($PSCmdlet.ShouldProcess("scheduled task '$TaskName'", "unregister")) {
+        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+    }
 }
 
 try {
-    Register-ScheduledTask `
-        -TaskName $TaskName `
-        -Action $Action `
-        -Trigger $Trigger `
-        -Settings $Settings `
-        -Description "LocalMcpTools - local MCP server for VS Code agents" `
-        -RunLevel Limited | Out-Null
+    Write-Log "registering scheduled task '$TaskName'..."
+    if ($PSCmdlet.ShouldProcess("scheduled task '$TaskName'", "register")) {
+        Register-ScheduledTask `
+            -TaskName $TaskName `
+            -Action $Action `
+            -Trigger $Trigger `
+            -Settings $Settings `
+            -Description "LocalMcpTools - local MCP server for VS Code agents" `
+            -RunLevel Limited | Out-Null
+    }
 }
 catch {
-    Write-Error "Register-ScheduledTask failed: $_"
-    exit 4
+    Write-Log "Register-ScheduledTask failed: $_" -Level error
+    exit $script:EXIT_REGISTER_FAILED
 }
 
-# Verify the registration actually landed (defensive — Register-ScheduledTask
-# can swallow non-fatal errors).
+# Verify the registration actually landed. Register-ScheduledTask can
+# return without raising on a non-fatal ACL / policy failure.
 $verify = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if (-not $verify) {
-    Write-Error "Register-ScheduledTask reported success but task '$TaskName' is not visible to Get-ScheduledTask."
-    exit 5
+    Write-Log "Register-ScheduledTask reported success but task '$TaskName' is not visible to Get-ScheduledTask." -Level error
+    exit $script:EXIT_VERIFY_FAILED
 }
 
-Write-Host "[localmcptools] scheduled task '$TaskName' is now active."
-Write-Host "  Trigger:  AtLogOn"
-Write-Host "  Action:   $PythonExecutable $actionArgs"
-Write-Host "  CWD:      $ProjectRoot"
-Write-Host "  Mode:     $modeDesc"
+Write-Log "scheduled task '$TaskName' is now active."
+Write-Log "  Trigger:  AtLogOn"
+Write-Log "  Action:   $PythonExecutable $actionArgs"
+Write-Log "  CWD:      $ProjectRoot"
+Write-Log "  Mode:     $modeDesc"
 Write-Host ""
 Write-Host "Test it manually with:  schtasks /Run /TN $TaskName"
-exit 0
+exit $script:EXIT_OK

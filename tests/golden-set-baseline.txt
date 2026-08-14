@@ -1,4 +1,4 @@
-﻿== golden-smoke against http://127.0.0.1:62221 ==
+﻿== golden-smoke against http://127.0.0.1:56825 ==
 
 [environment.get] ok=True  os={'name': 'nt', 'version': '10.0.26200', 'build': '11', 'architecture': 'AMD64'}
   {"ok": true, "data": {"os": {"name": "nt", "version": "10.0.26200", "build": "11", "architecture": "AMD64"}, "powershell": {"version": "5.1.26100.9168", "edition": "Desktop", "executable": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"}, "encoding": {"active_code_page": 65001, "console_output": "unknown", "preferred_fs": "utf-8"}, "user": {"name": "Transfinder", "is_admin": true}
@@ -13,13 +13,13 @@
   {"ok": true, "data": {"ports": [{"port": 80, "address": "0.0.0.0", "protocol": "tcp", "pid": 4, "managed_id": null}, {"port": 80, "address": "::", "protocol": "tcp", "pid": 4, "managed_id": null}, {"port": 135, "address": "0.0.0.0", "protocol": "tcp", "pid": 1200, "managed_id": null}, {"port": 135, "address": "::", "protocol": "tcp", "pid": 1200, "managed_id": null}, {"port": 139, "address": "172.
 
 [process.list_managed] ok=True  {"processes": []}
-  {"ok": true, "data": {"processes": []}, "meta": {"tool": "process.list_managed", "duration_ms": 11, "audit_id": "081ac205-9e57-4912-a5d2-2e5283026fd8", "log_path": null, "run_id": "d9085282-986f-48e0-9b5f-5a18c1002346", "output_handle": null, "workspace_id": null, "evidence_handle": null, "next_actions": []}, "error": null}
+  {"ok": true, "data": {"processes": []}, "meta": {"tool": "process.list_managed", "duration_ms": 11, "audit_id": "5045f5e3-beb0-4230-8fce-f502388d6dde", "log_path": null, "run_id": "da60522b-d68f-4d5b-993f-27cb44881e7c", "output_handle": null, "workspace_id": null, "evidence_handle": null, "next_actions": []}, "error": null}
 
-[workspace.register (repo root)] ok=True  workspace_id='bbc04a11d9d54095addf34434e8fd647'
-  {"ok": true, "data": {"workspace_id": "bbc04a11d9d54095addf34434e8fd647", "canonical_root": "D:\\AI\\Projects\\LocalMcpTools", "profile": "observe"}, "meta": {"tool": "workspace.register", "duration_ms": 10, "audit_id": "bf2ddfb1-42e2-4c54-be36-919fbf700159", "log_path": null, "run_id": "f8c43d1c-4e5e-4a31-8fc0-3c85facddc56", "output_handle": null, "workspace_id": null, "evidence_handle": null, "n
+[workspace.register (repo root)] ok=True  workspace_id='f21bc47825784ecda67d476853da99e0'
+  {"ok": true, "data": {"workspace_id": "f21bc47825784ecda67d476853da99e0", "canonical_root": "D:\\AI\\Projects\\LocalMcpTools", "profile": "observe"}, "meta": {"tool": "workspace.register", "duration_ms": 14, "audit_id": "a8bcadb7-65da-4d18-a7da-9ccea59c8d70", "log_path": null, "run_id": "eddd3af6-fa0a-421b-9a93-1ecf09106944", "output_handle": null, "workspace_id": null, "evidence_handle": null, "n
 
-[workspace.inspect] ok=True  workspace_id='bbc04a11d9d54095addf34434e8fd647'
-  {"ok": true, "data": {"project_type": "python", "git": {"status": "dirty", "head": "dd32950", "branch": "main"}, "presets_available": ["test", "build", "lint", "dev_server"], "runtimes": [{"name": "python", "version": "Python 3.14.3", "path": "C:\\Users\\jason\\AppData\\Local\\Python\\bin\\python.EXE"}, {"name": "node", "version": "v20.19.6", "path": "C:\\nvm4w\\nodejs\\node.EXE"}, {"name": "npm",
+[workspace.inspect] ok=True  workspace_id='f21bc47825784ecda67d476853da99e0'
+  {"ok": true, "data": {"project_type": "python", "git": {"status": "dirty", "head": "e9f46f3", "branch": "main"}, "presets_available": ["test", "build", "lint", "dev_server"], "runtimes": [{"name": "python", "version": "Python 3.14.3", "path": "C:\\Users\\jason\\AppData\\Local\\Python\\bin\\python.EXE"}, {"name": "node", "version": "v20.19.6", "path": "C:\\nvm4w\\nodejs\\node.EXE"}, {"name": "npm",
 
 [workspace.search_text 'Mavis'] ok=True  {"matches": [{"file": "scripts\\golden-smoke.py", "line": 122, "text": "                    \"workspace.search_text 'Mav
   {"ok": true, "data": {"matches": [{"file": "scripts\\golden-smoke.py", "line": 122, "text": "                    \"workspace.search_text 'Mavis'\","}, {"file": "scripts\\golden-smoke.py", "line": 126, "text": "                        {\"workspace_id\": ws_id, \"pattern\": \"Mavis\", \"max_results\": 3},"}, {"file": "tests\\golden-set-baseline.txt", "line": 23, "text": "[workspace.search_text 'Mavi
@@ -28,6 +28,6 @@
   {"ok": true, "data": {"lines": ["# LocalMcpTools", "", "A local Model Context Protocol (MCP) toolset for VS Code agents", "(codebuddy, GitHub Copilot, and others).", "", "## Status", "", "**Phases 0-6 (`ui-automation-and-ocr`) code-complete.** E2E test", "suite covers phases 1, 2, 3, 4, 5, 6, 7, 8, 9 (243 tests, ~4 min).", "Live spike accuracy numbers + the cross-agent live hand-off"], "total_line
 
 [workspace.inspect (bad id) -> expect ok=false] ok=False  {"code": "workspace_not_registered", "message": "workspace_id='nope-not-real' is not registered", "suggestion": "list_wo
-  {"ok": false, "data": null, "meta": {"tool": "workspace.inspect", "duration_ms": 21, "audit_id": "f1d2c80c-eb0e-47de-9c1a-b524b6fc275c", "log_path": null, "run_id": "9d686b15-0f0a-451b-8cea-11653aa21b1a", "output_handle": null, "workspace_id": null, "evidence_handle": null, "next_actions": []}, "error": {"code": "workspace_not_registered", "message": "workspace_id='nope-not-real' is not registered
+  {"ok": false, "data": null, "meta": {"tool": "workspace.inspect", "duration_ms": 18, "audit_id": "83377638-958d-4414-970e-56ca50f68501", "log_path": null, "run_id": "e7d0a715-4417-4ff1-9720-bed3b78628ac", "output_handle": null, "workspace_id": null, "evidence_handle": null, "next_actions": []}, "error": {"code": "workspace_not_registered", "message": "workspace_id='nope-not-real' is not registered
 
 == done ==
