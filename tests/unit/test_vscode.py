@@ -55,20 +55,22 @@ def test_vscode_get_installed_extensions_parses(fake_appdata: Path) -> None:
     user = fake_appdata / "Code" / "User"
     user.mkdir(parents=True, exist_ok=True)
     (user / "extensions.json").write_text(
-        json.dumps([
-            {
-                "identifier": {"id": "ms-python.python"},
-                "name": "Python",
-                "version": "2024.0.0",
-                "isActive": True,
-            },
-            {
-                "identifier": {"id": "github.copilot-chat"},
-                "name": "Copilot Chat",
-                "version": "0.20.0",
-                "isActive": False,
-            },
-        ]),
+        json.dumps(
+            [
+                {
+                    "identifier": {"id": "ms-python.python"},
+                    "name": "Python",
+                    "version": "2024.0.0",
+                    "isActive": True,
+                },
+                {
+                    "identifier": {"id": "github.copilot-chat"},
+                    "name": "Copilot Chat",
+                    "version": "0.20.0",
+                    "isActive": False,
+                },
+            ]
+        ),
         encoding="utf-8",
     )
     out = vscode_tools.vscode_get_installed_extensions({})

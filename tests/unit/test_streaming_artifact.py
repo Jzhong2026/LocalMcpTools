@@ -8,7 +8,8 @@ from localmcptools.persistence import artifacts, db
 
 
 def test_streaming_artifact_can_be_tailed_then_sealed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("LMCP_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(db, "audit_db_path", lambda: tmp_path / "audit.sqlite")

@@ -31,13 +31,14 @@ def test_environment_get_returns_required_fields(monkeypatch, tmp_path: Path) ->
         "localmcptools.tools.environment._get_active_code_page",
         lambda: 65001,
     )
-    monkeypatch.setattr(
-        "localmcptools.tools.environment._get_is_admin", lambda: True
-    )
+    monkeypatch.setattr("localmcptools.tools.environment._get_is_admin", lambda: True)
     monkeypatch.setattr(
         "localmcptools.tools.environment._probe_powershell",
-        lambda: {"version": "5.1.22621", "edition": "Desktop",
-                 "executable": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"},
+        lambda: {
+            "version": "5.1.22621",
+            "edition": "Desktop",
+            "executable": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        },
     )
     monkeypatch.setenv("USERNAME", "alice")
 
@@ -70,9 +71,7 @@ def test_environment_get_sets_gbk_for_chinese(monkeypatch, tmp_path: Path) -> No
         "localmcptools.tools.environment._get_active_code_page",
         lambda: 936,
     )
-    monkeypatch.setattr(
-        "localmcptools.tools.environment._get_is_admin", lambda: False
-    )
+    monkeypatch.setattr("localmcptools.tools.environment._get_is_admin", lambda: False)
     monkeypatch.setattr(
         "localmcptools.tools.environment._probe_powershell",
         lambda: {"version": "5.1", "edition": "Desktop", "executable": "ps"},
@@ -81,9 +80,7 @@ def test_environment_get_sets_gbk_for_chinese(monkeypatch, tmp_path: Path) -> No
     assert payload["encoding"]["preferred_fs"] == "gbk"
 
 
-def test_environment_get_emits_next_actions_on_partial_failure(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_environment_get_emits_next_actions_on_partial_failure(monkeypatch, tmp_path: Path) -> None:
     """Encoding probe failing → ``next_actions`` must be set."""
     monkeypatch.setenv("LMCP_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(
@@ -94,9 +91,7 @@ def test_environment_get_emits_next_actions_on_partial_failure(
         "localmcptools.tools.environment._get_active_code_page",
         lambda: None,
     )
-    monkeypatch.setattr(
-        "localmcptools.tools.environment._get_is_admin", lambda: None
-    )
+    monkeypatch.setattr("localmcptools.tools.environment._get_is_admin", lambda: None)
     monkeypatch.setattr(
         "localmcptools.tools.environment._probe_powershell",
         lambda: {"version": None, "edition": None, "executable": None},
@@ -107,6 +102,7 @@ def test_environment_get_emits_next_actions_on_partial_failure(
     result = environment_get({})
     # ``environment_get`` returns a ToolResponse when next_actions exist.
     from localmcptools.tools._common import ToolResponse
+
     if isinstance(result, ToolResponse):
         assert result.ok is True
         assert result.meta.next_actions, "next_actions must be set on partial failure"

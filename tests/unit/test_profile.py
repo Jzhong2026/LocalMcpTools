@@ -75,8 +75,6 @@ def test_agent_supplied_profile_is_ignored_by_workspace_registration(
     root.mkdir()
     monkeypatch.setattr(db, "audit_db_path", lambda: database)
 
-    result = workspace_register(
-        {"path": str(root), "profile": Profile.WORKSPACE_EXEC.value}
-    )
+    result = workspace_register({"path": str(root), "profile": Profile.WORKSPACE_EXEC.value})
 
     assert result["profile"] == Profile.OBSERVE.value

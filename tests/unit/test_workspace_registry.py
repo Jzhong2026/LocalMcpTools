@@ -83,6 +83,7 @@ def test_canonicalize_rejects_nonexistent_path(tmp_path: Path) -> None:
 
 def os_sep() -> str:
     import os
+
     return os.sep
 
 
@@ -98,9 +99,7 @@ def test_register_returns_workspace(fresh_db: Path, ws_dir: Path) -> None:
     assert ws.id and len(ws.id) >= 16  # uuid4().hex → 32
 
 
-def test_register_idempotent_same_canonical_root(
-    fresh_db: Path, ws_dir: Path
-) -> None:
+def test_register_idempotent_same_canonical_root(fresh_db: Path, ws_dir: Path) -> None:
     """Two inputs that canonicalise to the same path share one row."""
     with db.connection(fresh_db) as conn:
         a = register(ws_dir, conn=conn)
@@ -140,9 +139,7 @@ def test_register_persists_to_db(fresh_db: Path, ws_dir: Path) -> None:
     assert rows[0].notes == "hello"
 
 
-def test_register_preserves_original_id_on_idempotent_replay(
-    fresh_db: Path, ws_dir: Path
-) -> None:
+def test_register_preserves_original_id_on_idempotent_replay(fresh_db: Path, ws_dir: Path) -> None:
     """The first id wins on subsequent identical registrations."""
     with db.connection(fresh_db) as conn:
         first = register(ws_dir, conn=conn)
@@ -157,9 +154,7 @@ def test_register_preserves_original_id_on_idempotent_replay(
 # --- list_workspaces ordering ---------------------------------------------
 
 
-def test_list_orders_by_registration_time(
-    fresh_db: Path, tmp_path: Path
-) -> None:
+def test_list_orders_by_registration_time(fresh_db: Path, tmp_path: Path) -> None:
     a = tmp_path / "a"
     b = tmp_path / "b"
     a.mkdir()
@@ -168,6 +163,7 @@ def test_list_orders_by_registration_time(
         ra = register(a, conn=conn)
         # tiny gap so timestamps differ deterministically
         import time
+
         time.sleep(0.01)
         rb = register(b, conn=conn)
         rows = list_workspaces(conn=conn)
@@ -211,9 +207,7 @@ def test_workspace_contains_self(fresh_db: Path, ws_dir: Path) -> None:
     assert ws.contains(child)
 
 
-def test_workspace_rejects_path_outside(
-    fresh_db: Path, ws_dir: Path, tmp_path: Path
-) -> None:
+def test_workspace_rejects_path_outside(fresh_db: Path, ws_dir: Path, tmp_path: Path) -> None:
     other = tmp_path / "other"
     other.mkdir()
     with db.connection(fresh_db) as conn:
@@ -251,9 +245,7 @@ def test_assert_inside_workspace_rejects_escape(
         "..\\..\\..\\..\\etc\\passwd",
     ],
 )
-def test_path_escape_rejected_early(
-    fresh_db: Path, hostile: str
-) -> None:
+def test_path_escape_rejected_early(fresh_db: Path, hostile: str) -> None:
     """Escape attempts fail before any disk I/O happens."""
     with pytest.raises(InvalidPath):
         register(hostile)
@@ -269,9 +261,7 @@ def test_db_schema_is_current_via_registry(fresh_db: Path, ws_dir: Path) -> None
         assert row["v"] == db.CURRENT_SCHEMA_VERSION
         ws = register(ws_dir, conn=conn)
         # Workspaces table is present and has our row.
-        rows = conn.execute(
-            "SELECT id FROM workspaces WHERE id = ?", (ws.id,)
-        ).fetchall()
+        rows = conn.execute("SELECT id FROM workspaces WHERE id = ?", (ws.id,)).fetchall()
         assert len(rows) == 1
 
 
@@ -279,9 +269,7 @@ def test_db_workspaces_and_artifacts_tables_present(fresh_db: Path) -> None:
     with db.connection(fresh_db) as conn:
         names = {
             r["name"]
-            for r in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
+            for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
     assert "calls" in names
     assert "workspaces" in names

@@ -49,7 +49,9 @@ async def test_runner_interleaves_output_and_reports_exit_code(tmp_path: Path) -
 
 @pytest.mark.asyncio
 async def test_runner_returns_timeout_as_data(tmp_path: Path) -> None:
-    result = await run([sys.executable, "-c", "import time; time.sleep(2)"], cwd=str(tmp_path), timeout_ms=10)
+    result = await run(
+        [sys.executable, "-c", "import time; time.sleep(2)"], cwd=str(tmp_path), timeout_ms=10
+    )
     assert result.timed_out
     assert result.exit_code is None
 
@@ -58,8 +60,10 @@ async def test_runner_returns_timeout_as_data(tmp_path: Path) -> None:
 async def test_runner_rejects_long_running_shell_mode(tmp_path: Path) -> None:
     with pytest.raises(UseStartDevServer):
         await run(
-            [sys.executable, "-c", "print('never')"], cwd=str(tmp_path),
-            timeout_ms=60_000, reject_long_running=True,
+            [sys.executable, "-c", "print('never')"],
+            cwd=str(tmp_path),
+            timeout_ms=60_000,
+            reject_long_running=True,
         )
 
 

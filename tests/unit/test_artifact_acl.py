@@ -13,6 +13,7 @@ Covers the spike DoD bullets:
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -36,7 +37,7 @@ from localmcptools.persistence.artifacts import (
 
 
 @pytest.fixture
-def fresh_db(tmp_path: Path) -> Path:
+def fresh_db(tmp_path: Path) -> Iterator[Path]:
     """Set LMCP_DATA_DIR to tmp_path via the audit DB at that path."""
     from localmcptools.persistence import db
 
@@ -67,6 +68,7 @@ def test_write_returns_canonical_handle(data_root: Path, fresh_db: Path) -> None
     assert h.endswith(f"/calls/{call_id}.log")
     # Date component matches today's UTC date.
     import re as _re
+
     m = _re.match(r"^art://(\d{4}-\d{2}-\d{2})/calls/[\w\-]+\.log$", h)
     assert m is not None
 
@@ -76,7 +78,9 @@ def test_handle_matches_build_handle(data_root: Path, fresh_db: Path) -> None:
     h = write("x", call_id=cid, conn=db_connection(fresh_db))
     # Re-derive and compare the date portion.
     import re as _re
+
     m = _re.match(r"^art://(\d{4}-\d{2}-\d{2})/", h)
+    assert m is not None, "test setup must produce a valid handle date prefix"
     date_str = m.group(1)
     assert build_handle(date_str, cid) == h
 
@@ -90,8 +94,13 @@ def test_parse_handle_roundtrip(data_root: Path, fresh_db: Path) -> None:
 
 
 def test_parse_handle_rejects_malformed() -> None:
-    for bad in ("", "not-a-handle", "art://not-a-date/calls/x.log",
-                "art://2026-08-07/notcalls/x.log", "art://2026-08-07/calls/x.txt"):
+    for bad in (
+        "",
+        "not-a-handle",
+        "art://not-a-date/calls/x.log",
+        "art://2026-08-07/notcalls/x.log",
+        "art://2026-08-07/calls/x.txt",
+    ):
         with pytest.raises(ArtifactNotFound):
             parse_handle(bad)
 
@@ -102,10 +111,7 @@ def test_parse_handle_rejects_malformed() -> None:
 def test_write_redacts_before_disk(data_root: Path, fresh_db: Path) -> None:
     """Tokens are gone from the on-disk file even if they were in the input."""
     cid = "redaction-test"
-    content = (
-        "Authorization: Bearer abcdef12345\n"
-        "config: api_key=sk_live_42424242424242\n"
-    )
+    content = "Authorization: Bearer abcdef12345\nconfig: api_key=sk_live_42424242424242\n"
     h = write(content, call_id=cid, conn=db_connection(fresh_db))
     rec = lookup(h, conn=db_connection(fresh_db))
     on_disk = Path(rec.path).read_text(encoding="utf-8")
@@ -155,6 +161,7 @@ def test_acl_applied_on_windows(data_root: Path, fresh_db: Path) -> None:
     assert Path(rec.path).exists()
     # Run icacls and confirm "Everyone" is NOT in the ACE list.
     import subprocess
+
     res = subprocess.run(
         ["icacls", str(rec.path)],
         capture_output=True,
@@ -169,8 +176,7 @@ def test_acl_skipped_on_non_windows(data_root: Path, fresh_db: Path) -> None:
     """On non-Windows, write() does not raise RedactionFailed."""
     if os.name == "nt":
         pytest.skip("Windows test elsewhere")
-    h = write("non-windows content", call_id="non-windows",
-              conn=db_connection(fresh_db))
+    h = write("non-windows content", call_id="non-windows", conn=db_connection(fresh_db))
     assert h.startswith("art://")
 
 
@@ -179,8 +185,7 @@ def test_acl_skipped_on_non_windows(data_root: Path, fresh_db: Path) -> None:
 
 def test_lookup_unknown_raises(data_root: Path, fresh_db: Path) -> None:
     with pytest.raises(ArtifactNotFound):
-        lookup("art://2099-01-01/calls/no-such-id.log",
-               conn=db_connection(fresh_db))
+        lookup("art://2099-01-01/calls/no-such-id.log", conn=db_connection(fresh_db))
 
 
 def test_exists_true_for_known(data_root: Path, fresh_db: Path) -> None:
@@ -244,12 +249,7 @@ def test_read_range_negative_start_raises(data_root: Path, fresh_db: Path) -> No
 
 def test_search_returns_matches(data_root: Path, fresh_db: Path) -> None:
     cid = "search-test"
-    content = (
-        "alpha\n"
-        "beta\n"
-        "gamma alpha delta\n"
-        "epsilon\n"
-    )
+    content = "alpha\nbeta\ngamma alpha delta\nepsilon\n"
     h = write(content, call_id=cid, conn=db_connection(fresh_db))
     matches = search(h, r"alpha", max_results=10)
     assert len(matches) == 2
@@ -296,4 +296,5 @@ def test_should_artifact_size_boundary(data_root: Path, fresh_db: Path) -> None:
 def db_connection(path: Path):
     """Open a sqlite connection at the test's audit DB."""
     from localmcptools.persistence import db
+
     return db.get_connection(path)

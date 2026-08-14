@@ -27,11 +27,11 @@ def test_output_tail(fresh_db: Path) -> None:
     # At the unit-test level we get the ToolResponse directly so
     # assert against its data + meta fields.
     from localmcptools.tools._common import ToolResponse
+
     assert isinstance(res, ToolResponse)
+    assert res.data is not None, "ToolResponse.data must be set for output tools"
     assert res.ok is True
-    assert res.data["lines"] == [
-        "line 45", "line 46", "line 47", "line 48", "line 49"
-    ]
+    assert res.data["lines"] == ["line 45", "line 46", "line 47", "line 48", "line 49"]
     assert res.data["handle"] == handle
     # REQ-OUT-2: the handle is mirrored on meta.evidence_handle.
     assert res.meta.evidence_handle == handle
@@ -40,8 +40,9 @@ def test_output_tail(fresh_db: Path) -> None:
 
 def test_output_read_range(fresh_db: Path) -> None:
     conn = db.get_connection(fresh_db)
-    handle = artifacts.write("\n".join(f"L{i}" for i in range(10)) + "\n",
-                             call_id="test-range", conn=conn)
+    handle = artifacts.write(
+        "\n".join(f"L{i}" for i in range(10)) + "\n", call_id="test-range", conn=conn
+    )
     res = output_read_range({"handle": handle, "start_line": 3, "end_line": 6})
     assert res["lines"] == ["L3", "L4", "L5"]
 

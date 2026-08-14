@@ -115,7 +115,30 @@ strict = true
 warn_unused_ignores = true
 warn_return_any = true
 disallow_untyped_defs = true
+# Tests import the local package by name; point mypy at the source
+# tree so it can analyse (and type-check) the package modules rather
+# than treating them as opaque third-party imports.
+mypy_path = "src"
 
 [[tool.mypy.overrides]]
 module = ["mcp.*", "chardet", "win32api", "win32con", "win32job", "pywintypes"]
 ignore_missing_imports = true
+
+# Test code is allowed to be looser than production code:
+#   * disallow_untyped_defs  — fixtures and parametrised cases don't
+#                              always carry full annotations.
+#   * attr-defined           — tests poke at module-level helpers via
+#                              ``monkeypatch.setattr`` and the patched
+#                              binding isn't visible to mypy.
+#   * call-arg               — some tests DELIBERATELY pass invalid
+#                              kwargs to verify Pydantic models reject
+#                              them (see test_envelope.py::*_forbids_*).
+# Real type bugs (Any | None indexing, dict invariance, generator
+# return types) still surface and must be fixed individually.
+[[tool.mypy.overrides]]
+module = "tests.*"
+disable_error_code = [
+    "attr-defined",
+    "call-arg",
+    "no-untyped-def",
+]

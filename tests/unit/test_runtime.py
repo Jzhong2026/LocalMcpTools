@@ -7,6 +7,7 @@ exists on the test machine.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -21,7 +22,7 @@ from localmcptools.tools.runtime import (
 
 
 @pytest.fixture(autouse=True)
-def _reset_runtime_cache() -> None:
+def _reset_runtime_cache() -> Iterator[None]:
     """Clear the module-level 60s cache between tests."""
     runtime_tools._runtime_cache.clear()
     yield

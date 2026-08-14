@@ -74,6 +74,7 @@ def test_record_start_inserts_running_row(fresh_db: Path) -> None:
     assert row["finished_at"] is None
     # Args redacted column is JSON-encoded.
     import json as _json
+
     assert _json.loads(row["args_redacted"]) == {"placeholder": True}
 
 
@@ -90,9 +91,9 @@ def test_record_finish_updates_row(fresh_db: Path) -> None:
             policy_version="spike-0",
             conn=conn,
         )
-        ts_start = conn.execute(
-            "SELECT timestamp FROM calls WHERE id = ?", (call_id,)
-        ).fetchone()["timestamp"]
+        ts_start = conn.execute("SELECT timestamp FROM calls WHERE id = ?", (call_id,)).fetchone()[
+            "timestamp"
+        ]
         audit.record_finish(
             call_id,
             ok=True,
@@ -243,9 +244,7 @@ def test_record_finish_sets_approval_id(fresh_db: Path) -> None:
         path=fresh_db,
     )
     with db.connection(fresh_db) as conn:
-        row = conn.execute(
-            "SELECT approval_id FROM calls WHERE id = ?", (call_id,)
-        ).fetchone()
+        row = conn.execute("SELECT approval_id FROM calls WHERE id = ?", (call_id,)).fetchone()
     assert row["approval_id"] == "appr-xyz-001"
 
 
@@ -273,9 +272,7 @@ def test_record_finish_log_path_accepts_artifact_handle(fresh_db: Path) -> None:
         path=fresh_db,
     )
     with db.connection(fresh_db) as conn:
-        row = conn.execute(
-            "SELECT log_path FROM calls WHERE id = ?", (call_id,)
-        ).fetchone()
+        row = conn.execute("SELECT log_path FROM calls WHERE id = ?", (call_id,)).fetchone()
     assert row["log_path"] == handle
 
 

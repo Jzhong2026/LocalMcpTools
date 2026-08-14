@@ -23,7 +23,9 @@ def test_classify_exit_code_fallback() -> None:
 
 
 def test_classify_denied_by_rule_extracts_rule_id() -> None:
-    result = classify({"ok": 0, "error_code": "denied_by_rule", "blocked_by": "rule:block-format-volume"})
+    result = classify(
+        {"ok": 0, "error_code": "denied_by_rule", "blocked_by": "rule:block-format-volume"}
+    )
     assert result.classification is Classification.DENIED_BY_RULE
     assert result.rule_id == "block-format-volume"
 
@@ -72,7 +74,9 @@ def test_diagnostics_explain_failure_with_synthetic_row() -> None:
     assert any("block-privilege-escalation" in item for item in out["next_actions"])
 
 
-def test_diagnostics_collect_returns_summary_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_diagnostics_collect_returns_summary_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # Point data dir at tmp so the audit DB doesn't pollute the user's
     # %APPDATA%. No calls are actually recorded here.
     monkeypatch.setenv("LMCP_DATA_DIR", str(tmp_path))
@@ -90,7 +94,9 @@ def test_diagnostics_collect_rejects_invalid_depth() -> None:
     assert out["error"]["code"] == "invalid_args"
 
 
-def test_diagnostics_collect_full_depth_returns_handles(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_diagnostics_collect_full_depth_returns_handles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("LMCP_DATA_DIR", str(tmp_path))
     out = diagnostics_collect({"depth": "full"})
     assert "handles" in out

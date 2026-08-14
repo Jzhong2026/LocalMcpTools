@@ -63,11 +63,16 @@ def test_hot_reload_picks_up_new_custom_rule(tmp_path: Path) -> None:
     engine = RuleEngine(custom_dir=custom)
     engine.reload()
     assert engine.match("danger-tool") is None
-    (custom / "custom.json").write_text(json.dumps({
-        "id": "custom-block", "severity": "high", "match": {
-            "type": "any_of", "rules": [{"cmd_name": "danger-tool"}]
-        },
-    }), encoding="utf-8")
+    (custom / "custom.json").write_text(
+        json.dumps(
+            {
+                "id": "custom-block",
+                "severity": "high",
+                "match": {"type": "any_of", "rules": [{"cmd_name": "danger-tool"}]},
+            }
+        ),
+        encoding="utf-8",
+    )
     assert engine.reload()["errors"] == []
     assert engine.match("danger-tool --now").rule_id == "custom-block"  # type: ignore[union-attr]
 
@@ -76,12 +81,17 @@ def test_rule_hits_accumulate_and_are_bounded(database: Path) -> None:
     with db.connection(database) as conn:
         record_hit("block-format-volume", "x" * 500, conn=conn)
         record_hit("block-format-volume", "diskpart", conn=conn)
-        row = conn.execute("SELECT * FROM rule_hit_stats WHERE rule_id = ?", ("block-format-volume",)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM rule_hit_stats WHERE rule_id = ?", ("block-format-volume",)
+        ).fetchone()
     assert row["hit_count"] == 2
     assert row["last_hit_cmd"] == "diskpart"
 
 
 def test_load_all_accepts_missing_custom_directory(tmp_path: Path) -> None:
-    rules, errors = load_all(Path(__file__).parents[2] / "src" / "localmcptools" / "safety" / "builtin", tmp_path / "missing")
+    rules, errors = load_all(
+        Path(__file__).parents[2] / "src" / "localmcptools" / "safety" / "builtin",
+        tmp_path / "missing",
+    )
     assert len(rules) == 10
     assert errors == []

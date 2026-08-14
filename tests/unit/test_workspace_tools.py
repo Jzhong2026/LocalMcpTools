@@ -74,8 +74,7 @@ def test_list_returns_registered(fresh_db: Path, project_dir: Path) -> None:
     res = workspace_list({})
     assert len(res["workspaces"]) >= 1
     assert any(
-        w["canonical_root"].lower().endswith(str(project_dir).lower())
-        for w in res["workspaces"]
+        w["canonical_root"].lower().endswith(str(project_dir).lower()) for w in res["workspaces"]
     )
 
 
@@ -103,9 +102,7 @@ def test_inspect_unknown_workspace_raises(fresh_db: Path) -> None:
 
 def test_search_finds_match(fresh_db: Path, project_dir: Path) -> None:
     ws_id = workspace_register({"path": str(project_dir)})["workspace_id"]
-    res = workspace_search_text(
-        {"workspace_id": ws_id, "pattern": "TODO", "max_results": 10}
-    )
+    res = workspace_search_text({"workspace_id": ws_id, "pattern": "TODO", "max_results": 10})
     assert any("TODO" in m["text"] for m in res["matches"])
 
 
@@ -119,9 +116,7 @@ def test_search_skips_default_excluded_dirs(fresh_db: Path, project_dir: Path) -
     (project_dir / "node_modules").mkdir()
     (project_dir / "node_modules" / "x.js").write_text("TODO leaked\n")
     ws_id = workspace_register({"path": str(project_dir)})["workspace_id"]
-    res = workspace_search_text(
-        {"workspace_id": ws_id, "pattern": "TODO", "max_results": 50}
-    )
+    res = workspace_search_text({"workspace_id": ws_id, "pattern": "TODO", "max_results": 50})
     # The match in node_modules must NOT be returned.
     files = {m["file"] for m in res["matches"]}
     assert not any("node_modules" in f for f in files)
@@ -129,9 +124,7 @@ def test_search_skips_default_excluded_dirs(fresh_db: Path, project_dir: Path) -
 
 def test_search_truncates_at_max_results(fresh_db: Path, project_dir: Path) -> None:
     ws_id = workspace_register({"path": str(project_dir)})["workspace_id"]
-    res = workspace_search_text(
-        {"workspace_id": ws_id, "pattern": "line", "max_results": 1}
-    )
+    res = workspace_search_text({"workspace_id": ws_id, "pattern": "line", "max_results": 1})
     assert len(res["matches"]) == 1
     assert res["truncated"] is True
     assert res["next_actions"]

@@ -5,15 +5,12 @@ Covers the change-5 OpenSpec scenarios for sections 4.1 and 4.3.
 
 from __future__ import annotations
 
-import asyncio
-
 import httpx
 import pytest
 from fastapi import FastAPI
 
 from localmcptools.transport import (
     BearerAuth,
-    OriginCSRF,
     SecurityContext,
     generate_token,
     is_unsafe_method,
@@ -42,7 +39,7 @@ def _build_app(token: str = "test-token") -> FastAPI:
         return {"ok": True}
 
     @app.post("/api/echo")
-    async def echo_post(payload: dict | None = None):
+    async def echo_post(payload: dict[str, object] | None = None) -> dict[str, object]:
         return {"ok": True, "received": payload}
 
     return app

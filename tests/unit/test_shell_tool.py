@@ -27,34 +27,66 @@ def shell_wrapper(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ShellWrapp
     with db.connection(database) as conn:
         workspace = register(root, conn=conn)
     service = ToolExecutionService(audit_path=database)
-    return database, workspace, service.register("shell.run_command", shell_run_command, param_names=("workspace_id", "cmd", "approval_id"))
+    return (
+        database,
+        workspace,
+        service.register(
+            "shell.run_command",
+            shell_run_command,
+            param_names=("workspace_id", "cmd", "approval_id"),
+        ),
+    )
 
 
-def test_observe_workspace_is_denied_before_requesting_approval(shell_wrapper: ShellWrapper) -> None:
+def test_observe_workspace_is_denied_before_requesting_approval(
+    shell_wrapper: ShellWrapper,
+) -> None:
     _database, workspace, wrapper = shell_wrapper
     response = wrapper(workspace_id=workspace.id, cmd="Write-Output hi")
     assert response["error"]["code"] == "insufficient_capability"
 
 
-def test_workspace_exec_without_approval_returns_pending_request(shell_wrapper: ShellWrapper) -> None:
+def test_workspace_exec_without_approval_returns_pending_request(
+    shell_wrapper: ShellWrapper,
+) -> None:
     database, workspace, wrapper = shell_wrapper
     with db.connection(database) as conn:
-        conn.execute("UPDATE workspaces SET profile = 'workspace_exec' WHERE id = ?", (workspace.id,))
+        conn.execute(
+            "UPDATE workspaces SET profile = 'workspace_exec' WHERE id = ?", (workspace.id,)
+        )
     response = wrapper(workspace_id=workspace.id, cmd="Write-Output hi")
     assert response["error"]["code"] == "approval_required"
     approval_id = response["error"]["approval_id"]
     with db.connection(database) as conn:
-        assert conn.execute("SELECT status FROM approvals WHERE id = ?", (approval_id,)).fetchone()["status"] == "pending"
+        assert (
+            conn.execute("SELECT status FROM approvals WHERE id = ?", (approval_id,)).fetchone()[
+                "status"
+            ]
+            == "pending"
+        )
 
 
 def test_rule_rejection_does_not_consume_approved_request(shell_wrapper: ShellWrapper) -> None:
     database, workspace, wrapper = shell_wrapper
     command = "Format-Volume -DriveLetter C"
     with db.connection(database) as conn:
-        conn.execute("UPDATE workspaces SET profile = 'workspace_exec' WHERE id = ?", (workspace.id,))
-        approval = request(workspace.id, "workspace_exec:shell.run_command", {"workspace_id": workspace.id, "cmd": command}, profile="workspace_exec", conn=conn)
+        conn.execute(
+            "UPDATE workspaces SET profile = 'workspace_exec' WHERE id = ?", (workspace.id,)
+        )
+        approval = request(
+            workspace.id,
+            "workspace_exec:shell.run_command",
+            {"workspace_id": workspace.id, "cmd": command},
+            profile="workspace_exec",
+            conn=conn,
+        )
         approve(approval.id, conn=conn)
     response = wrapper(workspace_id=workspace.id, cmd=command, approval_id=approval.id)
     assert response["error"]["code"] == "denied_by_rule"
     with db.connection(database) as conn:
-        assert conn.execute("SELECT status FROM approvals WHERE id = ?", (approval.id,)).fetchone()["status"] == "approved"
+        assert (
+            conn.execute("SELECT status FROM approvals WHERE id = ?", (approval.id,)).fetchone()[
+                "status"
+            ]
+            == "approved"
+        )

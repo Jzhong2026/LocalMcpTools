@@ -22,9 +22,7 @@ def project_dir(tmp_path: Path) -> Path:
     root = tmp_path / "proj"
     root.mkdir()
     (root / "pyproject.toml").write_text("[project]\nname='x'\n")
-    (root / "build.log").write_text(
-        "\n".join(f"line {i}" for i in range(20)) + "\n"
-    )
+    (root / "build.log").write_text("\n".join(f"line {i}" for i in range(20)) + "\n")
     (root / "main.py").write_text("# TODO: real\nprint('hi')\n")
     (root / "weird.bin").write_bytes(b"\x00\x01\x02binary")
     return root
@@ -32,10 +30,14 @@ def project_dir(tmp_path: Path) -> Path:
 
 def test_fs_read_range(fresh_db: Path, project_dir: Path) -> None:
     ws_id = workspace_register({"path": str(project_dir)})["workspace_id"]
-    res = fs_read_range({
-        "workspace_id": ws_id, "path": "build.log",
-        "start_line": 0, "end_line": 3,
-    })
+    res = fs_read_range(
+        {
+            "workspace_id": ws_id,
+            "path": "build.log",
+            "start_line": 0,
+            "end_line": 3,
+        }
+    )
     assert res["lines"] == ["line 0", "line 1", "line 2"]
     assert res["total_lines"] == 20
 
@@ -49,11 +51,14 @@ def test_fs_read_range_binary_returns_error(fresh_db: Path, project_dir: Path) -
 def test_fs_read_range_rejects_escape(fresh_db: Path, project_dir: Path) -> None:
     ws_id = workspace_register({"path": str(project_dir)})["workspace_id"]
     with pytest.raises(Exception):
-        fs_read_range({
-            "workspace_id": ws_id,
-            "path": str(project_dir) + "/../etc/passwd",
-            "start_line": 0, "end_line": 1,
-        })
+        fs_read_range(
+            {
+                "workspace_id": ws_id,
+                "path": str(project_dir) + "/../etc/passwd",
+                "start_line": 0,
+                "end_line": 1,
+            }
+        )
 
 
 def test_fs_tail_log_file(fresh_db: Path, project_dir: Path) -> None:
@@ -78,7 +83,8 @@ def test_fs_grep_files_skips_binary(fresh_db: Path, project_dir: Path) -> None:
 
 def test_fs_grep_files_include_glob(fresh_db: Path, project_dir: Path) -> None:
     ws_id = workspace_register({"path": str(project_dir)})["workspace_id"]
-    res = fs_grep_files({"workspace_id": ws_id, "pattern": "TODO",
-                         "include_glob": "*.py", "max_results": 10})
+    res = fs_grep_files(
+        {"workspace_id": ws_id, "pattern": "TODO", "include_glob": "*.py", "max_results": 10}
+    )
     files = {m["file"] for m in res["matches"]}
     assert all(f.endswith(".py") for f in files)

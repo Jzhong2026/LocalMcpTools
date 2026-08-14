@@ -111,9 +111,7 @@ def test_settings_scalar_override_replaces_dict(
     assert loaded["security"]["transport_mode"] == "stdio"
 
 
-def test_settings_path_override(
-    isolated_data_dir: Path, tmp_path: Path
-) -> None:
+def test_settings_path_override(isolated_data_dir: Path, tmp_path: Path) -> None:
     """``load_settings(path=...)`` reads from an explicit file (used by tests)."""
     cfg = tmp_path / "alt.json"
     cfg.write_text(json.dumps({"audit": {"retention_days": 30}}), encoding="utf-8")

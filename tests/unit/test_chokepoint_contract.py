@@ -55,9 +55,7 @@ def test_workspace_id_propagates_to_meta_and_audit(
         return {"project_type": "python"}
 
     service = ToolExecutionService(audit_path=fresh_db)
-    wrapper = service.register(
-        "workspace.inspect", fake_inspect, param_names=("workspace_id",)
-    )
+    wrapper = service.register("workspace.inspect", fake_inspect, param_names=("workspace_id",))
     ws_id = "0123456789abcdef0123456789abcdef"  # 32-hex
     envelope = wrapper(workspace_id=ws_id)
 
@@ -80,9 +78,7 @@ def test_workspace_id_absent_stays_none(fresh_db: Path) -> None:
     envelope = wrapper()
     assert envelope["meta"]["workspace_id"] is None
     with db.connection(fresh_db) as conn:
-        row = conn.execute(
-            "SELECT workspace_id FROM calls WHERE tool = 't.hello'"
-        ).fetchone()
+        row = conn.execute("SELECT workspace_id FROM calls WHERE tool = 't.hello'").fetchone()
     assert row["workspace_id"] is None
 
 
@@ -93,15 +89,11 @@ def test_workspace_id_junk_ignored(fresh_db: Path) -> None:
         return {"x": 1}
 
     service = ToolExecutionService(audit_path=fresh_db)
-    wrapper = service.register(
-        "t.hello", hello, param_names=("workspace_id",)
-    )
+    wrapper = service.register("t.hello", hello, param_names=("workspace_id",))
     envelope = wrapper(workspace_id="<script>alert(1)</script>")
     assert envelope["meta"]["workspace_id"] is None
     with db.connection(fresh_db) as conn:
-        row = conn.execute(
-            "SELECT workspace_id FROM calls WHERE tool = 't.hello'"
-        ).fetchone()
+        row = conn.execute("SELECT workspace_id FROM calls WHERE tool = 't.hello'").fetchone()
     assert row["workspace_id"] is None
 
 
@@ -132,9 +124,7 @@ def test_oversize_response_persists_as_artifact(fresh_db: Path) -> None:
 
     # The audit row also references the same handle via log_path.
     with db.connection(fresh_db) as conn:
-        row = conn.execute(
-            "SELECT log_path FROM calls WHERE tool = 't.loud'"
-        ).fetchone()
+        row = conn.execute("SELECT log_path FROM calls WHERE tool = 't.loud'").fetchone()
     assert row["log_path"] == handle
 
 
@@ -150,9 +140,7 @@ def test_small_response_stays_inline(fresh_db: Path) -> None:
     assert envelope["data"] == {"ok": True}
     assert envelope["meta"]["output_handle"] is None
     with db.connection(fresh_db) as conn:
-        row = conn.execute(
-            "SELECT log_path FROM calls WHERE tool = 't.quiet'"
-        ).fetchone()
+        row = conn.execute("SELECT log_path FROM calls WHERE tool = 't.quiet'").fetchone()
     assert row["log_path"] is None
 
 
@@ -168,6 +156,7 @@ def test_output_tail_meta_has_evidence_handle(fresh_db: Path) -> None:
     res = output_tail({"handle": handle, "n": 2})
     # Unit-level: the body returns a ToolResponse (chokepoint would wrap).
     assert isinstance(res, ToolResponse)
+    assert res.data is not None
     assert res.meta.evidence_handle == handle
     assert res.meta.output_handle == handle
     # data only carries the content, not the handle.
@@ -179,9 +168,7 @@ def test_output_tail_meta_has_evidence_handle(fresh_db: Path) -> None:
 # --- Fix 4: fs.read_range streams + exact total_lines -------------------
 
 
-def test_fs_read_range_exact_total_lines_on_large_file(
-    fresh_db: Path, project_dir: Path
-) -> None:
+def test_fs_read_range_exact_total_lines_on_large_file(fresh_db: Path, project_dir: Path) -> None:
     """A file bigger than the old head-truncation cap must still report
     its true total line count."""
     from localmcptools.tools.fs import fs_read_range
@@ -195,12 +182,14 @@ def test_fs_read_range_exact_total_lines_on_large_file(
             fh.write(f"line {i:08d}\n")
 
     ws_id = workspace_register({"path": str(project_dir)})["workspace_id"]
-    res = fs_read_range({
-        "workspace_id": ws_id,
-        "path": "big.log",
-        "start_line": 100_000,
-        "end_line": 100_005,
-    })
+    res = fs_read_range(
+        {
+            "workspace_id": ws_id,
+            "path": "big.log",
+            "start_line": 100_000,
+            "end_line": 100_005,
+        }
+    )
     assert res["lines"] == [
         "line 00100000",
         "line 00100001",
@@ -223,12 +212,14 @@ def test_fs_read_range_tail_of_huge_file(fresh_db: Path, project_dir: Path) -> N
             fh.write(f"line {i:08d}\n")
 
     ws_id = workspace_register({"path": str(project_dir)})["workspace_id"]
-    res = fs_read_range({
-        "workspace_id": ws_id,
-        "path": "big.log",
-        "start_line": line_count - 5,
-        "end_line": line_count,
-    })
+    res = fs_read_range(
+        {
+            "workspace_id": ws_id,
+            "path": "big.log",
+            "start_line": line_count - 5,
+            "end_line": line_count,
+        }
+    )
     assert res["lines"][0] == f"line {line_count - 5:08d}"
     assert res["lines"][-1] == f"line {line_count - 1:08d}"
     assert res["total_lines"] == line_count
@@ -250,10 +241,11 @@ def test_encoding_probe_uses_non_ascii_bytes(monkeypatch, tmp_path: Path) -> Non
 
     captured: dict[str, bytes] = {}
 
-    def fake_run(cmd, **kwargs):  # type: ignore[no-untyped-def]
+    def fake_run(cmd, **kwargs):
         class _R:
             stdout = b"\xe4\xb8\xad\xe6\x96\x87 hello\n"  # UTF-8 "中文 hello"
             stderr = b""
+
         captured["stdout"] = _R.stdout
         return _R()
 
@@ -280,18 +272,18 @@ def test_encoding_probe_emits_real_probe_string(monkeypatch, tmp_path: Path) -> 
 
     seen_cmd: list[str] = []
 
-    def fake_run(cmd, **kwargs):  # type: ignore[no-untyped-def]
+    def fake_run(cmd, **kwargs):
         seen_cmd.append(cmd[-1] if cmd else "")
+
         class _R:
             stdout = b""
             stderr = b""
+
         return _R()
 
     monkeypatch.setattr(env_mod.subprocess, "run", fake_run)
     monkeypatch.setattr(env_mod, "_encoding_cache", {"text": None, "at": 0.0})
-    fake_chardet = _types.SimpleNamespace(
-        detect=lambda raw: {"encoding": None, "confidence": 0.0}
-    )
+    fake_chardet = _types.SimpleNamespace(detect=lambda raw: {"encoding": None, "confidence": 0.0})
     monkeypatch.setitem(sys.modules, "chardet", fake_chardet)
 
     env_mod._probe_console_encoding_via_powershell()
@@ -307,10 +299,11 @@ def test_encoding_probe_returns_unknown_on_low_confidence(
 
     from localmcptools.tools import environment as env_mod
 
-    def fake_run(cmd, **kwargs):  # type: ignore[no-untyped-def]
+    def fake_run(cmd, **kwargs):
         class _R:
             stdout = b"\xd6\xd0\xce\xc4 hello\n"  # GBK "中文 hello"
             stderr = b""
+
         return _R()
 
     monkeypatch.setattr(env_mod.subprocess, "run", fake_run)
@@ -318,9 +311,7 @@ def test_encoding_probe_returns_unknown_on_low_confidence(
     monkeypatch.setitem(
         sys.modules,
         "chardet",
-        _types.SimpleNamespace(
-            detect=lambda raw: {"encoding": "gbk", "confidence": 0.3}
-        ),
+        _types.SimpleNamespace(detect=lambda raw: {"encoding": "gbk", "confidence": 0.3}),
     )
 
     assert env_mod._probe_console_encoding_via_powershell() == "unknown"

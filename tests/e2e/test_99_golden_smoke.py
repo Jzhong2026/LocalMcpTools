@@ -42,12 +42,14 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 # are stable strings that survive a diff round-trip. ``workspace_id``
 # is a fresh UUID per workspace.register call, so it has to be
 # normalised too — it shows up both inside JSON data and on the
-# one-line summary line.
+# one-line summary line. ``head`` is the workspace's current git HEAD,
+# which moves on every commit so it can't be part of a stable baseline.
 _NORMALIZE_RULES: dict[str, str] = {
     "audit_id": "<AUDIT_ID>",
     "run_id": "<RUN_ID>",
     "duration_ms": "<DURATION_MS>",
     "workspace_id": "<WORKSPACE_ID>",
+    "head": "<GIT_HEAD>",
 }
 
 
@@ -61,14 +63,25 @@ def _normalize(text: str) -> str:
     string after the field name with the placeholder, which covers
     both styles.
 
-    Also normalises three environment-dependent patterns that aren't
+    Also normalises four environment-dependent patterns that aren't
     tied to a specific field name:
       * version strings shaped like X.Y.Z.W (4 dot-separated ints)
+      * partial IP addresses inside the 400-char body truncation window
+        (e.g. "192.168." or "172.") — these can leak through because
+        the truncation cuts mid-address and version_pat requires
+        complete segments
       * ``"pid": <int>`` and ``pid=<int>`` in process-list output
       * ephemeral test ports in the smoke header URL
     """
     out: list[str] = []
     version_pat = re.compile(r"\b\d+\.\d+\.\d+(?:\.\d+)+\b")
+    # IP-style fragments that the 400-char body print can cut off
+    # mid-address (and even mid-quote, leaving no closing ``"`` to
+    # anchor against). Match an opening ``"``, one or more digits,
+    # then any number of ``.<digit>`` pairs with an optional trailing
+    # ``.``. Catches ``"172.`` (truncated right after the first dot)
+    # through ``"192.168.1.1"`` (full quad).
+    partial_ip_pat = re.compile(r'"\d+(?:\.\d+)*\.?')
     for line in text.splitlines():
         for field, placeholder in _NORMALIZE_RULES.items():
             line = re.sub(rf'"{field}":\s*"[^"]*"', f'"{field}": "{placeholder}"', line)
@@ -78,6 +91,10 @@ def _normalize(text: str) -> str:
         # Generic 4-segment versions (PowerShell, OS, etc.) drift across
         # Windows updates; replace so the baseline stays portable.
         line = version_pat.sub("<VERSION>", line)
+        # IP fragments that survived version_pat because the 400-char
+        # body print cut them mid-segment. Replace the partial numeric
+        # string with a stable placeholder.
+        line = partial_ip_pat.sub('"<IP>"', line)
         # PIDs in process-list output differ on every boot.
         line = re.sub(r'"pid":\s*-?\d+', '"pid": <PID>', line)
         line = re.sub(r"pid=\d+", "pid=<PID>", line)

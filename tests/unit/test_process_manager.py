@@ -20,8 +20,12 @@ def process_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def test_create_find_list_and_exit(process_db: Path) -> None:
     handle = artifacts.create_stream(call_id="managed-test")
     item = manager.create_row(
-        workspace_id="ws", preset="node-vite", command="npx vite", cwd="C:\\repo",
-        pid=12345, log_handle=handle,
+        workspace_id="ws",
+        preset="node-vite",
+        command="npx vite",
+        cwd="C:\\repo",
+        pid=12345,
+        log_handle=handle,
     )
     assert manager.find_by_id(item.id).pid == 12345
     assert manager.find_by_pid(12345) == item
@@ -36,4 +40,3 @@ def test_create_find_list_and_exit(process_db: Path) -> None:
 def test_unknown_managed_id(process_db: Path) -> None:
     with pytest.raises(manager.ManagedProcessNotFound):
         manager.find_by_id("mp-missing")
-

@@ -78,6 +78,7 @@ async def test_settings_post_persists_to_disk(
         # Bootstrap CSRF.
         await client.get("/api/csrf-token")
         cookie = client.cookies.get("lmcp_csrf")
+        assert cookie is not None, "csrf cookie must be set after /api/csrf-token"
         assert cookie == "test-token"
         r = await client.post(
             "/api/settings",
@@ -100,6 +101,7 @@ async def test_settings_post_marks_restart_keys(
     async with _origin_client(control_app) as client:
         await client.get("/api/csrf-token")
         cookie = client.cookies.get("lmcp_csrf")
+        assert cookie is not None, "csrf cookie must be set after /api/csrf-token"
         r = await client.post(
             "/api/settings",
             json={"patch": {"server": {"port": 9999}}},
@@ -135,10 +137,19 @@ async def test_audit_list_returns_recorded_rows(
     from localmcptools.persistence import audit
 
     audit.record_start(
-        "call-1", "environment.get", {}, "run-1", "observe", "phase-6",
+        "call-1",
+        "environment.get",
+        {},
+        "run-1",
+        "observe",
+        "phase-6",
     )
     audit.record_finish(
-        "call-1", ok=True, error_code=None, error_message=None, duration_ms=10,
+        "call-1",
+        ok=True,
+        error_code=None,
+        error_message=None,
+        duration_ms=10,
     )
     async with _origin_client(control_app) as client:
         r = await client.get("/api/audit")
@@ -194,6 +205,7 @@ async def test_rules_reload_succeeds(control_app: FastAPI) -> None:
     async with _origin_client(control_app) as client:
         await client.get("/api/csrf-token")
         cookie = client.cookies.get("lmcp_csrf")
+        assert cookie is not None, "csrf cookie must be set after /api/csrf-token"
         r = await client.post("/api/rules/reload", headers={"X-LMCP-CSRF": cookie})
     assert r.status_code == 200
     assert r.json()["reloaded"] == 10
@@ -204,6 +216,7 @@ async def test_rules_toggle_unknown_id_returns_404(control_app: FastAPI) -> None
     async with _origin_client(control_app) as client:
         await client.get("/api/csrf-token")
         cookie = client.cookies.get("lmcp_csrf")
+        assert cookie is not None, "csrf cookie must be set after /api/csrf-token"
         r = await client.patch(
             "/api/rules/does-not-exist",
             json={"enabled": False},
@@ -217,6 +230,7 @@ async def test_rules_toggle_disables_then_re_enables(control_app: FastAPI) -> No
     async with _origin_client(control_app) as client:
         await client.get("/api/csrf-token")
         cookie = client.cookies.get("lmcp_csrf")
+        assert cookie is not None, "csrf cookie must be set after /api/csrf-token"
         r = await client.patch(
             "/api/rules/block-format-volume",
             json={"enabled": False},
@@ -228,7 +242,9 @@ async def test_rules_toggle_disables_then_re_enables(control_app: FastAPI) -> No
 
         engine = RuleEngine()
         engine.reload()
-        assert engine.match("Format-Volume -DriveLetter C") is not None  # engine doesn't share state, but shows it would
+        assert (
+            engine.match("Format-Volume -DriveLetter C") is not None
+        )  # engine doesn't share state, but shows it would
         # Re-enable
         r = await client.patch(
             "/api/rules/block-format-volume",
@@ -270,6 +286,7 @@ async def test_shutdown_returns_ok_in_standalone_mode(control_app: FastAPI) -> N
     async with _origin_client(control_app) as client:
         await client.get("/api/csrf-token")
         cookie = client.cookies.get("lmcp_csrf")
+        assert cookie is not None, "csrf cookie must be set after /api/csrf-token"
         r = await client.post("/api/shutdown", headers={"X-LMCP-CSRF": cookie})
     assert r.status_code == 200
     assert r.json()["ok"] is True

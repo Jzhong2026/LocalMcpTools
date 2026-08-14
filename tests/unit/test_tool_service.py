@@ -33,9 +33,7 @@ def test_register_and_invoke_writes_audit(fresh_db: Path) -> None:
     assert envelope["ok"] is True
     assert envelope["data"] == {"echo": {}}
     with db.connection(fresh_db) as conn:
-        rows = conn.execute(
-            "SELECT * FROM calls WHERE tool = 't.noop'"
-        ).fetchall()
+        rows = conn.execute("SELECT * FROM calls WHERE tool = 't.noop'").fetchall()
     assert len(rows) == 1
     assert rows[0]["status"] == "success"
     assert rows[0]["profile"] == "observe"

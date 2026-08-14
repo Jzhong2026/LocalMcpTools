@@ -39,6 +39,7 @@ from localmcptools.ui.ocr import (
 from localmcptools.ui.screens import TokenBucket
 from localmcptools.ui.verify import (
     OCRPredicate,
+    Predicate,
     PredicateResult,
     ScreenshotPredicate,
     UIAPredicate,
@@ -51,7 +52,6 @@ from localmcptools.ui.windows import (
     lookup,
     revoke,
 )
-
 
 # --- safety.filters -------------------------------------------------------
 
@@ -229,7 +229,7 @@ def test_ocr_find_text_handles_invalid_query() -> None:
 
 
 def test_verify_returns_passed_when_all_predicates_pass() -> None:
-    predicates = [
+    predicates: list[Predicate] = [
         _AlwaysPassPredicate("a"),
         _AlwaysPassPredicate("b"),
     ]
@@ -239,7 +239,7 @@ def test_verify_returns_passed_when_all_predicates_pass() -> None:
 
 
 def test_verify_aborts_on_first_failure() -> None:
-    predicates = [
+    predicates: list[Predicate] = [
         _AlwaysPassPredicate("a"),
         _AlwaysFailPredicate("b"),
         _AlwaysPassPredicate("never-runs"),
