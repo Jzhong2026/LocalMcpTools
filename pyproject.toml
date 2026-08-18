@@ -44,8 +44,10 @@ dependencies = [
     "Pillow>=10.0,<12",
     # winsdk is the Windows OCR provider. Optional because the spike
     # runs without it; the package falls back to a stub provider
-    # that emits ``uncertain=True`` results.
-    "winsdk>=1.0; sys_platform == 'win32'",
+    # that emits ``uncertain=True`` results. Only beta releases are
+    # published and the >=1.0 floor rejects pre-releases, so allow
+    # betas (1.0.0b*).
+    "winsdk>=1.0b1; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]

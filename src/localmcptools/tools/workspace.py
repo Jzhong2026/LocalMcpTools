@@ -19,7 +19,6 @@ and for agents that want to enumerate.
 
 from __future__ import annotations
 
-import asyncio
 import os
 import re
 from pathlib import Path
@@ -27,6 +26,7 @@ from typing import Any, cast
 
 from ..execution.context import current_gate
 from ..execution.runner import run
+from ..execution.async_util import run_async
 from ..persistence import artifacts
 from ..policy.approval import (
     ApprovalDigestMismatch,
@@ -318,7 +318,7 @@ def _run_preset(args: dict[str, Any], action: str) -> ToolResponse:
     except ApprovalNotApproved:
         fail(code="approval_required", message="approval is still pending", tool=tool, audit_id="pending", run_id="pending", workspace_id=ws.id, approval_id=approval_id)
     timeout_ms = int(args.get("timeout_ms") or 120_000)
-    result = asyncio.run(run(argv, cwd=ws.canonical_root, timeout_ms=timeout_ms, gate=current_gate()))
+    result = run_async(run(argv, cwd=ws.canonical_root, timeout_ms=timeout_ms, gate=current_gate()))
     handle = artifacts.write(result.output)
     meta = ToolMeta(tool=tool, duration_ms=0, audit_id="pending", run_id="pending", workspace_id=ws.id, output_handle=handle)
     if result.timed_out:

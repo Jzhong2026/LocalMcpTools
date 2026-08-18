@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 import shutil
 from typing import Any, cast
@@ -12,6 +11,7 @@ from ..execution.concurrency import QueueTimeout
 from ..execution.context import current_gate
 from ..execution.powershell import build_powershell_args
 from ..execution.runner import run
+from ..execution.async_util import run_async
 from ..persistence import artifacts
 from ..policy.approval import (
     ApprovalDigestMismatch,
@@ -88,7 +88,7 @@ def shell_run_command(args: dict[str, Any]) -> ToolResponse:
         fail(code="invalid_args", message=str(exc), tool="shell.run_command", audit_id="pending", run_id="pending", workspace_id=workspace.id)
     powershell = shutil.which("powershell") or shutil.which("pwsh") or "powershell.exe"
     try:
-        result = asyncio.run(run([powershell, *build_powershell_args(command)], cwd=workspace.canonical_root, env=env, timeout_ms=timeout_ms, gate=current_gate(), reject_long_running=True))
+        result = run_async(run([powershell, *build_powershell_args(command)], cwd=workspace.canonical_root, env=env, timeout_ms=timeout_ms, gate=current_gate(), reject_long_running=True))
     except QueueTimeout:
         fail(code="queue_timeout", message="execution queue timeout", tool="shell.run_command", audit_id="pending", run_id="pending", workspace_id=workspace.id)
     redacted_output, _ = redact(result.output)
@@ -116,7 +116,7 @@ def _filtered_env(workspace_id: str, raw: Any) -> tuple[dict[str, str], list[str
     allowlists = settings.get("workspaces", {}).get("env_allowlists", {})
     allowed = set(allowlists.get(workspace_id, [])) if isinstance(allowlists, dict) else set()
     accepted = {key: value for key, value in raw.items() if key in allowed}
-    return {**os.environ, **accepted}, sorted(set(raw) - set(accepted))
+    return {**os.environ, **accepted}, sorted(set(raw) - set(allowed))
 
 
 __all__ = ["shell_run_command"]
