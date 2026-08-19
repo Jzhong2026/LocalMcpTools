@@ -128,6 +128,7 @@ class WindowsOcrProvider:
             import winsdk.windows.media.ocr as win_ocr  # type: ignore[import-untyped]
             import winsdk.windows.globalization as win_glob  # type: ignore[import-untyped]
             import winsdk.windows.graphics.imaging as win_img  # type: ignore[import-untyped]
+            import winsdk.windows.storage.streams as win_streams  # type: ignore[import-untyped]
 
             languages_list = []
             for lang in self._languages:
@@ -137,7 +138,7 @@ class WindowsOcrProvider:
                     pass
             # The winsdk API is verbose; keep this in a helper so the
             # contract above stays clean.
-            self._engine = _build_engine(win_ocr, win_glob, win_img, languages)
+            self._engine = _build_engine(win_ocr, win_glob, win_img, win_streams, languages)
             self._available = True
         except Exception as exc:  # noqa: BLE001 — winsdk may not be present
             self._init_error = str(exc)
@@ -154,7 +155,7 @@ class WindowsOcrProvider:
             return OcrResult(blocks=[], full_text="", uncertain=True)
 
 
-def _build_engine(win_ocr: Any, win_glob: Any, win_img: Any, languages: tuple[str, ...]):
+def _build_engine(win_ocr: Any, win_glob: Any, win_img: Any, win_streams: Any, languages: tuple[str, ...]):
     """Helper that wires up the Windows OCR engine.
 
     Lives outside :meth:`WindowsOcrProvider.__init__` so the import
@@ -173,8 +174,8 @@ def _build_engine(win_ocr: Any, win_glob: Any, win_img: Any, languages: tuple[st
             engine = None
             for lang in languages:
                 try:
-                    language = win_glob.Language(language_tag=lang)
-                    engine = await win_ocr.OcrEngine.try_create_from_language(language)
+                    language = win_glob.Language(lang)
+                    engine = win_ocr.OcrEngine.try_create_from_language(language)
                     if engine is not None:
                         break
                 except Exception:  # noqa: BLE001
@@ -184,8 +185,12 @@ def _build_engine(win_ocr: Any, win_glob: Any, win_img: Any, languages: tuple[st
             if engine is None:
                 return OcrResult(blocks=[], full_text="", uncertain=True)
 
-            stream = win_img.InMemoryRandomAccessStream()
-            await stream.write_async(image_bytes)
+            stream = win_streams.InMemoryRandomAccessStream()
+            writer = win_streams.DataWriter(stream)
+            writer.write_bytes(image_bytes)
+            await writer.store_async()
+            await writer.flush_async()
+            stream.seek(0)
             decoder = await win_img.BitmapDecoder.create_async(stream)
             bitmap = await decoder.get_software_bitmap_async()
             result = await engine.recognize_async(bitmap)

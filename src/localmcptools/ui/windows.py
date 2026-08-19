@@ -81,12 +81,12 @@ def list_windows() -> list[WindowSummary]:
         summaries: list[WindowSummary] = []
         for control in auto.GetRootControl().GetChildren():
             try:
-                if not control.IsWindow:
+                if control.ControlType != auto.ControlType.WindowControl:
                     continue
                 process_name = ""
                 pid = 0
                 try:
-                    process_id, _name = auto.GetWindowProcess(control.Handle)
+                    process_id, _name = auto.GetWindowProcess(control.NativeWindowHandle)
                     pid = int(process_id) if process_id else 0
                     process_name = _name or ""
                 except Exception:  # noqa: BLE001 — UIA raises per-process
@@ -101,7 +101,7 @@ def list_windows() -> list[WindowSummary]:
                         process=process_name,
                         pid=pid,
                         title=title,
-                        hwnd=int(control.Handle),
+                        hwnd=int(control.NativeWindowHandle),
                     )
                 )
             except Exception:  # noqa: BLE001 — never crash on a bad window

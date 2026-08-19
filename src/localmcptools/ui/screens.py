@@ -162,16 +162,86 @@ def capture_window_bytes(*, hwnd: int) -> bytes | None:
     NOT exposed as a tool — only callable from within the LocalMcpTools
     process. Used by :mod:`.ocr` to feed a window to the OCR provider
     without an artifact round-trip.
+
+    Uses Win32 ``PrintWindow`` (PW_RENDERFULLCONTENT) instead of
+    ``ImageGrab.grab`` so that GPU-composited windows (Electron / VS Code /
+    hardware-accelerated UIs) are captured correctly instead of coming back
+    as a black bitmap.
     """
     if os.name != "nt":
         return None
     try:
-        from PIL import ImageGrab  # type: ignore[import-untyped]
+        import ctypes
+        from ctypes import wintypes
+        from PIL import Image
+
+        class BITMAPINFOHEADER(ctypes.Structure):
+            _fields_ = [
+                ("biSize", ctypes.c_uint32),
+                ("biWidth", ctypes.c_int32),
+                ("biHeight", ctypes.c_int32),
+                ("biPlanes", ctypes.c_uint16),
+                ("biBitCount", ctypes.c_uint16),
+                ("biCompression", ctypes.c_uint32),
+                ("biSizeImage", ctypes.c_uint32),
+                ("biXPelsPerMeter", ctypes.c_int32),
+                ("biYPelsPerMeter", ctypes.c_int32),
+                ("biClrUsed", ctypes.c_uint32),
+                ("biClrImportant", ctypes.c_uint32),
+            ]
+
+        class BITMAPINFO(ctypes.Structure):
+            _fields_ = [
+                ("bmiHeader", BITMAPINFOHEADER),
+                ("bmiColors", ctypes.c_uint32 * 3),
+            ]
+
+        user32 = ctypes.windll.user32
+        gdi32 = ctypes.windll.gdi32
 
         bbox = _window_bbox(hwnd)
         if bbox is None:
             return None
-        image = ImageGrab.grab(bbox=bbox)
+        left, top, right, bottom = bbox
+        width = max(1, right - left)
+        height = max(1, bottom - top)
+
+        # Ensure the window is restored (not minimized -> offscreen -32000 coords)
+        SW_RESTORE = 9
+        user32.ShowWindow(hwnd, SW_RESTORE)
+
+        hdc_screen = user32.GetWindowDC(hwnd)
+        hdc_mem = gdi32.CreateCompatibleDC(hdc_screen)
+        hbm = gdi32.CreateCompatibleBitmap(hdc_screen, width, height)
+        gdi32.SelectObject(hdc_mem, hbm)
+
+        PW_RENDERFULLCONTENT = 2
+        if user32.PrintWindow(hwnd, hdc_mem, PW_RENDERFULLCONTENT) == 0:
+            # Fallback: try without the full-content flag
+            if user32.PrintWindow(hwnd, hdc_mem, 0) == 0:
+                gdi32.DeleteObject(hbm)
+                gdi32.DeleteDC(hdc_mem)
+                user32.ReleaseDC(hwnd, hdc_screen)
+                return None
+
+        bmi = BITMAPINFO()
+        bmi.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+        bmi.bmiHeader.biWidth = width
+        bmi.bmiHeader.biHeight = -height  # top-down
+        bmi.bmiHeader.biPlanes = 1
+        bmi.bmiHeader.biBitCount = 32
+        bmi.bmiHeader.biCompression = 0
+
+        buf = ctypes.create_string_buffer(width * height * 4)
+        gdi32.GetDIBits(hdc_mem, hbm, 0, height, buf, ctypes.byref(bmi), 0)
+
+        image = Image.frombuffer("RGBA", (width, height), buf, "raw", "BGRA", 0, 1)
+        image = image.convert("RGB")
+
+        gdi32.DeleteObject(hbm)
+        gdi32.DeleteDC(hdc_mem)
+        user32.ReleaseDC(hwnd, hdc_screen)
+
         buffer = BytesIO()
         image.save(buffer, format="PNG")
         return buffer.getvalue()

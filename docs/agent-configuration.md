@@ -212,6 +212,17 @@ remaining work is the Angular UI for browsing/filtering.
   override.
 - **Approvals keep expiring.** Default TTL is 10 minutes. Re-issue
   the approval immediately before retrying the call.
+- **VS Code pops up "OAuth 2.0 Dynamic Client Registration" for
+  `localmcptools`.** This means the entry in
+  `%APPDATA%\Code\User\mcp.json` is using `"type": "http"` with a
+  URL like `http://127.0.0.1:7890/mcp/`. VS Code's MCP client treats
+  every HTTP server as an OAuth authorization endpoint and tries to
+  register a client before it ever reads the `Authorization` header.
+  Switch the entry to `"type": "stdio"` (see the verified snippet
+  above) and re-run `scripts\apply-mcp-config.ps1`, which now writes
+  the stdio form. If you do need HTTP mode for a future Angular-UI
+  shared server, the OAuth piece has to be implemented on the server
+  side — see the section below.
 
 ---
 

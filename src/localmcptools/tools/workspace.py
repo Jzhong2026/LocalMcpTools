@@ -26,7 +26,7 @@ from typing import Any, cast
 
 from ..execution.context import current_gate
 from ..execution.runner import run
-from ..execution.async_util import run_async
+from ..execution.async_util import run_sync
 from ..persistence import artifacts
 from ..policy.approval import (
     ApprovalDigestMismatch,
@@ -155,7 +155,13 @@ def workspace_inspect(args: dict[str, Any]) -> Any:
             suggestion="re-register the directory",
             workspace_id=ws.id,
         )
-    payload = ws_inspect.inspect_workspace(root)
+    # ``inspect_workspace`` runs blocking ``subprocess.run`` probes (git /
+    # runtime detection, up to ~5s each). When this tool body is invoked
+    # from inside FastMCP's running event loop, calling a blocking
+    # subprocess directly would stall every other tool for the full
+    # duration. Offload the blocking call to a dedicated worker thread via
+    # ``run_sync`` so the MCP loop stays responsive.
+    payload = run_sync(ws_inspect.inspect_workspace, root)
     payload["workspace_id"] = ws.id
     payload["canonical_root"] = ws.canonical_root
     return payload

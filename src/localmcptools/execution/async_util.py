@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
-from typing import Any, cast
+from typing import Any, Callable, cast
 
 
 def run_async(coro: Any) -> Any:
@@ -37,4 +37,25 @@ def run_async(coro: Any) -> Any:
     return asyncio.run(coro)
 
 
-__all__ = ["run_async"]
+def run_sync(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """Execute a *blocking synchronous* callable ``func`` without stalling the
+    caller's event loop.
+
+    When invoked from inside an already-running event loop (the FastMCP
+    server case), ``func`` is submitted to a dedicated worker thread so the
+    loop stays responsive. From a plain synchronous context the call runs
+    directly. Use this for synchronous ``subprocess.run`` probes and other
+    blocking I/O that must not occupy the asyncio loop.
+    """
+    try:
+        asyncio.get_running_loop()
+        in_loop = True
+    except RuntimeError:
+        in_loop = False
+    if in_loop:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(func, *args, **kwargs).result()
+    return func(*args, **kwargs)
+
+
+__all__ = ["run_async", "run_sync"]

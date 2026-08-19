@@ -163,7 +163,9 @@ def fs_read_range(args: dict[str, Any]) -> Any:
     # text blob. Counting ``\n`` while we read gives an exact
     # ``total_lines`` regardless of file size.
     if end_line <= start_line:
-        return {"lines": [], "total_lines": _count_lines(p), "path": p.name}
+        # No explicit range (e.g. end_line omitted / <= start_line): read
+        # the whole file instead of returning an empty result.
+        end_line = _count_lines(p)
     lines: list[str] = []
     total_lines = 0
     current_line = 0

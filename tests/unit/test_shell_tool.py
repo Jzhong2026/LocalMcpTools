@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -9,7 +10,7 @@ from typing import Any
 import pytest
 
 from localmcptools.execution.service import ToolExecutionService
-from localmcptools.persistence import db
+from localmcptools.persistence import artifacts, db
 from localmcptools.policy.approval import approve, request
 from localmcptools.tools.shell import shell_run_command
 from localmcptools.workspaces.registry import Workspace, register
@@ -90,3 +91,61 @@ def test_rule_rejection_does_not_consume_approved_request(shell_wrapper: ShellWr
             ]
             == "approved"
         )
+
+
+def test_shell_run_command_executes_powershell_for_real(shell_wrapper: ShellWrapper) -> None:
+    """Approval-gated path actually runs a PowerShell command end to end."""
+    database, workspace, wrapper = shell_wrapper
+    with db.connection(database) as conn:
+        conn.execute(
+            "UPDATE workspaces SET profile = 'workspace_exec' WHERE id = ?", (workspace.id,)
+        )
+        approval = request(
+            workspace.id,
+            "workspace_exec:shell.run_command",
+            {"workspace_id": workspace.id, "cmd": "Write-Output hello-pwsh"},
+            profile="workspace_exec",
+            conn=conn,
+        )
+        approve(approval.id, conn=conn)
+
+    response = wrapper(
+        workspace_id=workspace.id,
+        cmd="Write-Output hello-pwsh",
+        approval_id=approval.id,
+    )
+    assert response["error"] is None, response
+    assert response["data"]["exit_code"] == 0
+    handle = response["meta"]["output_handle"]
+    assert handle is not None
+    artifact = "".join(artifacts.read_range(handle, 0, 9999))
+    assert "hello-pwsh" in artifact
+
+
+def test_shell_run_command_writes_file_via_powershell(shell_wrapper: ShellWrapper) -> None:
+    """Verify PowerShell really runs (file creation), not just a no-op echo."""
+    database, workspace, wrapper = shell_wrapper
+    target = os.path.join(workspace.canonical_root, "pwsh_out.txt")
+    with db.connection(database) as conn:
+        conn.execute(
+            "UPDATE workspaces SET profile = 'workspace_exec' WHERE id = ?", (workspace.id,)
+        )
+        approval = request(
+            workspace.id,
+            "workspace_exec:shell.run_command",
+            {"workspace_id": workspace.id, "cmd": f"Set-Content -Path '{target}' -Value 'pwsh-ok'"},
+            profile="workspace_exec",
+            conn=conn,
+        )
+        approve(approval.id, conn=conn)
+
+    response = wrapper(
+        workspace_id=workspace.id,
+        cmd=f"Set-Content -Path '{target}' -Value 'pwsh-ok'",
+        approval_id=approval.id,
+    )
+    assert response["error"] is None, response
+    assert response["data"]["exit_code"] == 0
+    assert os.path.exists(target)
+    with open(target, encoding="utf-8") as fh:
+        assert "pwsh-ok" in fh.read()

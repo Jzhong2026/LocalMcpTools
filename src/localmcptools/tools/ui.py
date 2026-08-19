@@ -75,8 +75,8 @@ def ui_authorize_window(args: dict[str, Any]) -> Any:
         return {"error": {"code": "invalid_args", "message": "hwnd must be an integer"}}
     title = str(args.get("title", ""))
     process = str(args.get("process", ""))
-    pid = int(args.get("pid", 0))
-    ttl_ms = int(args.get("ttl_ms", 60 * 60 * 1000))
+    pid = int(args.get("pid") or 0)
+    ttl_ms = int(args.get("ttl_ms") or 60 * 60 * 1000)
     row = authorize(hwnd=hwnd, process=process, pid=pid, title=title, ttl_ms=ttl_ms)
     return {"window": row.__dict__}
 
