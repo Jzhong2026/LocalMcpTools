@@ -116,10 +116,14 @@ def capture(
         if mode == "window":
             if hwnd is None:
                 return {"error": "hwnd_required"}
-            bbox = _window_bbox(hwnd)
-            if bbox is None:
-                return {"error": "window_not_found"}
-            image = ImageGrab.grab(bbox=bbox)
+            # Prefer Win32 PrintWindow (with SW_RESTORE so minimized windows
+            # are captured too), falling back to ImageGrab on failure. This
+            # matches _capture_image so both artifact and file paths behave
+            # the same for minimized / GPU-composited windows.
+            picture = _capture_image(mode="window", hwnd=hwnd)
+            if isinstance(picture, dict):
+                return picture
+            image = picture
         elif mode == "region":
             if region is None:
                 return {"error": "region_required"}
@@ -306,9 +310,23 @@ def capture_window_bytes(*, hwnd: int) -> bytes | None:
         width = max(1, right - left)
         height = max(1, bottom - top)
 
-        # Ensure the window is restored (not minimized -> offscreen -32000 coords)
+        # Ensure the window is restored (not minimized -> offscreen -32000 coords).
+        # A minimized window's GetWindowRect returns the taskbar-button rectangle
+        # (e.g. 160x28), so after restoring we re-read the rect to get the real
+        # restored size and force a repaint before PrintWindow reads the DC.
         SW_RESTORE = 9
-        user32.ShowWindow(hwnd, SW_RESTORE)
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, SW_RESTORE)
+            time.sleep(0.2)
+        rbbox = _window_bbox(hwnd)
+        if rbbox is not None:
+            left, top, right, bottom = rbbox
+            width = max(1, right - left)
+            height = max(1, bottom - top)
+        user32.RedrawWindow(
+            hwnd, None, None, 0x0001 | 0x0100
+        )  # RDW_INVALIDATE | RDW_UPDATENOW
+        user32.UpdateWindow(hwnd)
 
         hdc_screen = user32.GetWindowDC(hwnd)
         hdc_mem = gdi32.CreateCompatibleDC(hdc_screen)

@@ -72,6 +72,9 @@ psreadline/
 !server.log
 scratch/
 tmp/
+# Intermediate / throwaway files (screenshots, repro scripts, debug dumps).
+# Anything that is not part of the deliverable lives here.
+temp/
 # Local debug scratch dirs (smoke / repro / standalone tests we run
 # while debugging). Never committed; left around because the running
 # e2e process may still hold a file handle.

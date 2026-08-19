@@ -106,10 +106,76 @@ def list_windows() -> list[WindowSummary]:
                 )
             except Exception:  # noqa: BLE001 — never crash on a bad window
                 continue
+        # Fallback: uiautomation's walker skips minimized windows, so the
+        # screenshot / click tools can't target them. Supplement with a raw
+        # Win32 EnumWindows pass (which includes iconic windows) and add any
+        # hwnd the UIA pass missed.
+        try:
+            seen = {int(s.hwnd) for s in summaries}
+            _win32_enum_windows(summaries, seen)
+        except Exception as exc:  # noqa: BLE001
+            _log.debug("list_windows win32 fallback failed: %s", exc)
         return summaries
     except Exception as exc:  # noqa: BLE001 — UIA can refuse to initialise
         _log.debug("list_windows failed: %s", exc)
         return []
+
+
+def _win32_enum_windows(
+    summaries: list[WindowSummary], seen: set[int]
+) -> None:
+    """Supplement ``list_windows`` with minimized top-level windows.
+
+    ``uiautomation``'s walker does not yield iconic (minimized) windows, so
+    screenshot / click tools can't address them. A raw ``EnumWindows`` pass
+    includes those, so we add any hwnd the UIA pass missed. Same safety
+    filters (visible-process + title-blocklist) apply as the UIA path.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+
+    @ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+    def _callback(hwnd, _lparam):
+        try:
+            if int(hwnd) in seen:
+                return True
+            if not user32.IsWindowVisible(hwnd):
+                return True
+            pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            length = user32.GetWindowTextLengthW(hwnd)
+            buf = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, buf, length + 1)
+            title = buf.value or ""
+            if title_blocked(title):
+                return True
+            # Resolve process name from pid without importing psutil.
+            process_name = ""
+            try:
+                import psutil  # type: ignore[import-untyped]
+
+                proc = psutil.Process(int(pid.value))
+                process_name = proc.name() or ""
+            except Exception:  # noqa: BLE001 — psutil optional / access denied
+                process_name = ""
+            if process_name and not is_visible_process(process_name):
+                return True
+            summaries.append(
+                WindowSummary(
+                    process=process_name,
+                    pid=int(pid.value),
+                    title=title,
+                    hwnd=int(hwnd),
+                )
+            )
+            seen.add(int(hwnd))
+        except Exception:  # noqa: BLE001 — never crash on a bad window
+            pass
+        return True
+
+    user32.EnumWindows(_callback, 0)
 
 
 def authorize(
