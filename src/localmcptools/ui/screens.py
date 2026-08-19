@@ -156,6 +156,106 @@ def capture(
     }
 
 
+def _save_image(image: Any, path: str) -> dict[str, Any]:
+    """Persist a PIL image to ``path`` as PNG and return a result dict."""
+    try:
+        parent = os.path.dirname(os.path.abspath(path))
+        os.makedirs(parent, exist_ok=True)
+        image.save(path, format="PNG")
+    except Exception as exc:  # noqa: BLE001
+        _log.debug("screenshot save failed: %s", exc)
+        return {"error": "save_failed", "code": "invalid_path", "message": str(exc)}
+    return {
+        "path": os.path.abspath(path),
+        "width": int(image.width),
+        "height": int(image.height),
+    }
+
+
+def _capture_image(
+    *,
+    mode: str = "window",
+    hwnd: int | None = None,
+    region: dict[str, int] | None = None,
+) -> Any | dict[str, Any]:
+    """Produce a PIL image for the requested capture, or an error dict.
+
+    ``window`` mode prefers :func:`capture_window_bytes` (Win32
+    ``PrintWindow``) so GPU-composited windows are captured correctly,
+    falling back to ``ImageGrab`` if PrintWindow yields nothing.
+    """
+    if os.name != "nt":
+        return {"error": "platform_unsupported"}
+    try:
+        from PIL import ImageGrab  # type: ignore[import-untyped]
+    except ImportError:
+        return {"error": "pillow_not_installed"}
+
+    try:
+        if mode == "window":
+            if hwnd is None:
+                return {"error": "hwnd_required"}
+            data = capture_window_bytes(hwnd=hwnd)
+            if data:
+                from io import BytesIO as _B
+                from PIL import Image as _I
+                return _I.open(_B(data)).convert("RGB")
+            bbox = _window_bbox(hwnd)
+            if bbox is None:
+                return {"error": "window_not_found"}
+            return ImageGrab.grab(bbox=bbox)
+        elif mode == "region":
+            if region is None:
+                return {"error": "region_required"}
+            bbox = (
+                int(region["x"]),
+                int(region["y"]),
+                int(region["x"]) + int(region["width"]),
+                int(region["y"]) + int(region["height"]),
+            )
+            return ImageGrab.grab(bbox=bbox)
+        elif mode == "full":
+            return ImageGrab.grab()
+        return {"error": "invalid_mode", "code": "invalid_args"}
+    except Exception as exc:  # noqa: BLE001
+        _log.debug("screenshot capture failed: %s", exc)
+        return {"error": "capture_failed", "message": str(exc)}
+
+
+def capture_to_file(
+    *,
+    path: str,
+    mode: str = "window",
+    hwnd: int | None = None,
+    region: dict[str, int] | None = None,
+    rate_key: str = "default",
+) -> dict[str, Any]:
+    """Capture a screenshot and write it directly to ``path`` as a PNG.
+
+    Unlike :func:`capture`, this returns the on-disk file path instead of
+    an artifact handle, so the resulting image can be opened / displayed
+    directly. Path safety (whitelisting) is the caller's responsibility;
+    this function only creates the file.
+
+    Returns ``{path, width, height, mode}`` or an error dict.
+    """
+    if not SCREENSHOT_BUCKET.check(rate_key):
+        return {
+            "error": "rate_limit",
+            "code": "rate_limit_exceeded",
+            "message": f"screenshot rate limit ({DEFAULT_RATE_PER_MINUTE}/min) hit for {rate_key!r}",
+            "next_actions": ["wait 60 seconds before retrying"],
+        }
+    image = _capture_image(mode=mode, hwnd=hwnd, region=region)
+    if isinstance(image, dict):
+        return image
+    result = _save_image(image, path)
+    if "error" in result:
+        return result
+    result["mode"] = mode
+    return result
+
+
 def capture_window_bytes(*, hwnd: int) -> bytes | None:
     """Capture a window's bytes directly, for in-process OCR consumers.
 
@@ -268,5 +368,6 @@ __all__ = [
     "SCREENSHOT_BUCKET",
     "TokenBucket",
     "capture",
+    "capture_to_file",
     "capture_window_bytes",
 ]

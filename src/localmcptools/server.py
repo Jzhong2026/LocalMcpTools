@@ -393,6 +393,17 @@ def _register_tools(service: ToolExecutionService) -> None:
         description="Capture a region {x,y,width,height}; returned as an artifact handle. Rate-limited 20/min.",
         param_names=("region",),
     )
+    wrappers["ui.screenshot_to_file"] = service.register(
+        "ui.screenshot_to_file", ui.ui_screenshot_to_file,
+        title="Screenshot to a PNG file",
+        description=(
+            "Capture the full desktop, an authorised window, or a region and "
+            "write it directly to a .png path so it can be opened/displayed. "
+            "Path is confined to the workspace root (or %TEMP%/localmcptools). "
+            "Rate-limited 20/min."
+        ),
+        param_names=("path", "workspace_id", "window_id", "region"),
+    )
     wrappers["ui.click_element"] = service.register(
         "ui.click_element", ui.ui_click_element,
         title="Click inside an authorised window",

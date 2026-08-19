@@ -33,6 +33,8 @@ matrix.
 from __future__ import annotations
 
 import logging
+import os
+import tempfile
 from typing import Any, cast
 
 from ..policy.approval import (
@@ -150,6 +152,95 @@ def ui_screenshot_region(args: dict[str, Any]) -> Any:
     if not isinstance(region, dict):
         return {"error": {"code": "invalid_args", "message": "region must be an object"}}
     return screens.capture(mode="region", region=region, rate_key="region")
+
+
+def _safe_screenshot_path(raw: Any, workspace_id: str | None) -> str | None:
+    """Validate and normalise a screenshot output path.
+
+    Returns the absolute path (ensuring a ``.png`` extension) if it is
+    allowed, or ``None`` if it must be rejected.
+    """
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    # No traversal segments allowed at any point.
+    if ".." in raw.replace("\\", "/").split("/"):
+        return None
+    if not os.path.isabs(raw):
+        return None
+    try:
+        resolved = os.path.realpath(raw)
+    except (OSError, ValueError):
+        return None
+    if not resolved.lower().endswith(".png"):
+        resolved += ".png"
+    if workspace_id:
+        try:
+            workspace = resolve(workspace_id)
+        except WorkspaceNotRegistered:
+            return None
+        if not workspace.contains(resolved):
+            return None
+        return resolved
+    # No workspace: confine to the per-user temp sandbox.
+    sandbox = os.path.join(tempfile.gettempdir(), "localmcptools")
+    try:
+        resolved_c = os.path.normcase(os.path.realpath(resolved))
+        sandbox_c = os.path.normcase(os.path.realpath(sandbox))
+    except (OSError, ValueError):
+        return None
+    prefix = sandbox_c if sandbox_c.endswith(os.sep) else sandbox_c + os.sep
+    if resolved_c != sandbox_c and not resolved_c.startswith(prefix):
+        return None
+    return resolved
+
+
+def ui_screenshot_to_file(args: dict[str, Any]) -> Any:
+    """Capture the desktop / a window / a region and save it to a PNG file.
+
+    Unlike ``ui.screenshot_*`` (which return an opaque artifact handle),
+    this writes the image to ``path`` so it can be opened directly. The
+    path is confined to the given ``workspace_id``'s root, or — when no
+    workspace is supplied — to ``%TEMP%/localmcptools``.
+
+    Modes (exactly one of ``window_id`` / ``region`` selects the mode;
+    neither means full desktop):
+
+    - full desktop (no ``window_id`` / ``region``)
+    - a window (``window_id`` from ``ui.authorize_window``)
+    - a rectangular ``region`` ``{x, y, width, height}``
+    """
+    path = _safe_screenshot_path(args.get("path"), args.get("workspace_id") or None)
+    if path is None:
+        return {
+            "error": "invalid_path",
+            "message": (
+                "path must be absolute, traversal-free, end in .png, and "
+                "live inside the workspace root (or %TEMP%/localmcptools)"
+            ),
+        }
+    workspace_id = args.get("workspace_id") or None
+    if workspace_id:
+        try:
+            resolve(workspace_id)
+        except WorkspaceNotRegistered as exc:
+            return {"error": "workspace_not_registered", "message": str(exc)}
+
+    window_id = args.get("window_id")
+    region = args.get("region") or {}
+    if isinstance(window_id, str) and window_id:
+        if not is_authorized(window_id=window_id):
+            return {"error": "window_not_authorized", "message": "call ui.authorize_window first"}
+        from ..ui.windows import lookup
+
+        row = lookup(window_id=window_id)
+        if row is None:
+            return {"error": "window_not_authorized"}
+        return screens.capture_to_file(
+            path=path, mode="window", hwnd=row.hwnd, rate_key=f"file:window:{window_id}",
+        )
+    if isinstance(region, dict) and region:
+        return screens.capture_to_file(path=path, mode="region", region=region, rate_key="file:region")
+    return screens.capture_to_file(path=path, mode="full", rate_key="file:full")
 
 
 # --- Side-effect tools ----------------------------------------------------
@@ -371,6 +462,7 @@ __all__ = [
     "ui_revoke_window",
     "ui_screenshot_full",
     "ui_screenshot_region",
+    "ui_screenshot_to_file",
     "ui_screenshot_window",
     "ui_type_text",
 ]
