@@ -182,24 +182,87 @@ def _require_window(args: dict[str, Any], *, tool: str) -> str:
     return window_id
 
 
+#: Error slugs that older ``ui.*`` modules spoke as bare strings before
+#: the codebase standardised on ``{"error": {"code", "message"}}``. Kept so
+#: a straggler module still produces a *useful* code instead of being
+#: flattened to ``internal_error`` with a useless message.
+_LEGACY_ERROR_CODES: dict[str, str] = {
+    "rate_limit": "rate_limit_exceeded",
+    "platform_unsupported": "platform_unsupported",
+    "invalid_path": "invalid_path",
+    "window_not_authorized": "window_not_authorized",
+    "workspace_not_registered": "workspace_not_registered",
+    "capture_failed": "capture_failed",
+    "hwnd_required": "invalid_args",
+    "region_required": "invalid_args",
+    "invalid_mode": "invalid_args",
+    "pillow_not_installed": "internal_error",
+    "artifact_failed": "internal_error",
+    "save_failed": "internal_error",
+    "window_not_found": "capture_failed",
+}
+
+
 def _raise_if_failed(result: Any, *, tool: str) -> None:
-    """Turn a module-layer ``error`` dict into a real ``ok: false``."""
+    """Turn a module-layer ``error`` payload into a real ``ok: false``.
+
+    Understands both dialects the ``ui.*`` modules have used:
+
+    - nested (current): ``{"error": {"code": ..., "message": ...}}``
+    - flat (legacy): ``{"error": "rate_limit", "code": ..., "message": ...,
+      "next_actions": [...]}``
+
+    The legacy branch used to collapse every bare string to
+    ``internal_error`` *and throw away the sibling ``message``*, which is
+    why ``ui.screenshot_to_file`` used to report a rejected path as
+    ``internal_error`` with no explanation. Unknown codes still fall back
+    to ``internal_error`` (that is what ``fail()`` accepts) but now keep
+    the original slug in the message so the cause stays visible.
+    """
     if not isinstance(result, dict):
         return
     error = result.get("error")
     if not error:
         return
+    suggestion: str | None = None
     if isinstance(error, str):
-        error = {"code": "internal_error", "message": error}
+        # Legacy flat shape — lift the sibling fields out of the envelope.
+        slug = error
+        raw_message = str(result.get("message") or slug)
+        explicit = result.get("code")
+        mapped = _LEGACY_ERROR_CODES.get(slug)
+        if explicit:
+            code = str(explicit)
+        elif mapped:
+            code = mapped
+        else:
+            # Neither an explicit code nor a mapping: `internal_error` is
+            # the only thing `fail()` accepts, but downgrading alone would
+            # erase the slug and leave the caller with a contentless
+            # failure. Keep it in the message.
+            code = "internal_error"
+            raw_message = f"{slug}: {raw_message}"
+        actions = result.get("next_actions") or result.get("suggestion")
+        if isinstance(actions, (list, tuple)):
+            suggestion = "; ".join(str(a) for a in actions) or None
+        elif actions:
+            suggestion = str(actions)
+        error = {"code": code, "message": raw_message}
+    else:
+        suggestion = str(error.get("suggestion") or "") or None
     code = str(error.get("code") or "internal_error")
     if code not in STANDARD_ERROR_CODES:
+        message = str(error.get("message") or f"{tool} failed")
+        raise_value = f"{code}: {message}"
         code = "internal_error"
+        error = {"code": code, "message": raise_value}
     fail(
         code=code,
         message=str(error.get("message") or f"{tool} failed"),
         tool=tool,
         audit_id="pending",
         run_id="pending",
+        suggestion=suggestion,
     )
     raise AssertionError("unreachable — fail() always raises")
 
@@ -245,30 +308,47 @@ def ui_find_element(args: dict[str, Any]) -> Any:
 
 
 def ui_screenshot_window(args: dict[str, Any]) -> Any:
-    window_id = args.get("window_id")
-    if not isinstance(window_id, str) or not window_id:
-        return {"error": {"code": "invalid_args", "message": "window_id is required"}}
-    if not is_authorized(window_id=window_id):
-        return {"error": {"code": "window_not_authorized"}}
+    tool = "ui.screenshot_window"
+    window_id = _require_window(args, tool=tool)
     from ..ui.windows import lookup
 
     row = lookup(window_id=window_id)
     if row is None:
-        return {"error": {"code": "window_not_authorized"}}
-    return screens.capture(
+        fail(
+            code="window_not_authorized",
+            message="the authorization expired or was revoked",
+            tool=tool,
+            audit_id="pending",
+            run_id="pending",
+        )
+    result = screens.capture(
         mode="window", hwnd=row.hwnd, rate_key=f"window:{window_id}",
     )
+    _raise_if_failed(result, tool=tool)
+    return result
 
 
 def ui_screenshot_full(args: dict[str, Any]) -> Any:
-    return screens.capture(mode="full", rate_key="full")
+    tool = "ui.screenshot_full"
+    result = screens.capture(mode="full", rate_key="full")
+    _raise_if_failed(result, tool=tool)
+    return result
 
 
 def ui_screenshot_region(args: dict[str, Any]) -> Any:
-    region = args.get("region") or {}
-    if not isinstance(region, dict):
-        return {"error": {"code": "invalid_args", "message": "region must be an object"}}
-    return screens.capture(mode="region", region=region, rate_key="region")
+    tool = "ui.screenshot_region"
+    region = args.get("region")
+    if not isinstance(region, dict) or not region:
+        fail(
+            code="invalid_args",
+            message="region must be an object with x, y, width and height",
+            tool=tool,
+            audit_id="pending",
+            run_id="pending",
+        )
+    result = screens.capture(mode="region", region=region, rate_key="region")
+    _raise_if_failed(result, tool=tool)
+    return result
 
 
 def _safe_screenshot_path(raw: Any, workspace_id: str | None) -> str | None:
@@ -326,38 +406,67 @@ def ui_screenshot_to_file(args: dict[str, Any]) -> Any:
     - a window (``window_id`` from ``ui.authorize_window``)
     - a rectangular ``region`` ``{x, y, width, height}``
     """
-    path = _safe_screenshot_path(args.get("path"), args.get("workspace_id") or None)
-    if path is None:
-        return {
-            "error": "invalid_path",
-            "message": (
-                "path must be absolute, traversal-free, end in .png, and "
-                "live inside the workspace root (or %TEMP%/localmcptools)"
-            ),
-        }
+    tool = "ui.screenshot_to_file"
+    # Resolve the workspace *before* validating the path. The other order
+    # reports an unregistered workspace as `invalid_path` with a message
+    # about absolute paths and traversal, which sends the caller off
+    # fixing a path that was never the problem.
     workspace_id = args.get("workspace_id") or None
     if workspace_id:
         try:
             resolve(workspace_id)
         except WorkspaceNotRegistered as exc:
-            return {"error": "workspace_not_registered", "message": str(exc)}
+            fail(
+                code="workspace_not_registered",
+                message=str(exc),
+                tool=tool,
+                audit_id="pending",
+                run_id="pending",
+                suggestion="register the workspace first via workspace.register",
+            )
+    path = _safe_screenshot_path(args.get("path"), workspace_id)
+    if path is None:
+        fail(
+            code="invalid_path",
+            message=(
+                "path must be absolute, traversal-free, end in .png, and "
+                "live inside the workspace root (or %TEMP%/localmcptools)"
+            ),
+            tool=tool,
+            audit_id="pending",
+            run_id="pending",
+            suggestion="pass an absolute .png path, or drop workspace_id to write into %TEMP%/localmcptools",
+        )
 
     window_id = args.get("window_id")
     region = args.get("region") or {}
     if isinstance(window_id, str) and window_id:
-        if not is_authorized(window_id=window_id):
-            return {"error": "window_not_authorized", "message": "call ui.authorize_window first"}
+        window_id = _require_window(args, tool=tool)
         from ..ui.windows import lookup
 
         row = lookup(window_id=window_id)
         if row is None:
-            return {"error": "window_not_authorized"}
-        return screens.capture_to_file(
+            fail(
+                code="window_not_authorized",
+                message="the authorization expired or was revoked",
+                tool=tool,
+                audit_id="pending",
+                run_id="pending",
+            )
+        result = screens.capture_to_file(
             path=path, mode="window", hwnd=row.hwnd, rate_key=f"file:window:{window_id}",
         )
+        _raise_if_failed(result, tool=tool)
+        return result
     if isinstance(region, dict) and region:
-        return screens.capture_to_file(path=path, mode="region", region=region, rate_key="file:region")
-    return screens.capture_to_file(path=path, mode="full", rate_key="file:full")
+        result = screens.capture_to_file(
+            path=path, mode="region", region=region, rate_key="file:region",
+        )
+        _raise_if_failed(result, tool=tool)
+        return result
+    result = screens.capture_to_file(path=path, mode="full", rate_key="file:full")
+    _raise_if_failed(result, tool=tool)
+    return result
 
 
 # --- Side-effect tools ----------------------------------------------------

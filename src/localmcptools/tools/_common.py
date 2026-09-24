@@ -75,6 +75,13 @@ ERR_SOURCE_NOT_ALLOWED = "source_not_allowed"
 # could not be captured" — the two have completely different fixes.
 ERR_CAPTURE_FAILED = "capture_failed"
 
+# Screenshot throttling. ``ui/screens.py`` already spoke this pair out
+# loud, but only one of the two names was reachable through the tool
+# layer; registering both is what turns "screenshot silently did
+# nothing because you hit 60/min" into a retryable ``ok: false``.
+ERR_RATE_LIMIT_EXCEEDED = "rate_limit_exceeded"
+ERR_PLATFORM_UNSUPPORTED = "platform_unsupported"
+
 STANDARD_ERROR_CODES: tuple[str, ...] = (
     ERR_INTERNAL_ERROR,
     ERR_INVALID_ARGS,
@@ -105,6 +112,8 @@ STANDARD_ERROR_CODES: tuple[str, ...] = (
     ERR_WINDOW_NOT_AUTHORIZED,
     ERR_SOURCE_NOT_ALLOWED,
     ERR_CAPTURE_FAILED,
+    ERR_RATE_LIMIT_EXCEEDED,
+    ERR_PLATFORM_UNSUPPORTED,
 )
 
 

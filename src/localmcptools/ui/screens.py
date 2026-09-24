@@ -31,6 +31,27 @@ _log = logging.getLogger(__name__)
 DEFAULT_RATE_PER_MINUTE = 20
 
 
+def _error(code: str, message: str, *, suggestion: str | None = None) -> dict[str, Any]:
+    """Build a failure in the shape the envelope contract expects.
+
+    Mirrors :func:`ui.tree._error` so every ``ui.*`` module speaks one
+    error dialect. This used to be a bare string (``{"error":
+    "rate_limit"}``) with an optional sibling ``code`` key, so the tool
+    layer had to guess which of the two names was the real one and
+    several paths carried no message at all — a caller reading only
+    ``ok`` saw a failed screenshot reported as a success.
+
+    Every ``code`` here MUST already exist in
+    ``tools._common.STANDARD_ERROR_CODES``; ``tools.ui._raise_if_failed``
+    degrades unknown codes to ``internal_error``, which would make the
+    envelope *less* informative than the old bare string.
+    """
+    error: dict[str, Any] = {"code": code, "message": message}
+    if suggestion:
+        error["suggestion"] = suggestion
+    return {"error": error}
+
+
 @dataclass
 class TokenBucket:
     """Per-key sliding-window counter.
@@ -98,24 +119,30 @@ def capture(
     inline.
     """
     if not SCREENSHOT_BUCKET.check(rate_key):
-        return {
-            "error": "rate_limit",
-            "code": "rate_limit_exceeded",
-            "message": f"screenshot rate limit ({DEFAULT_RATE_PER_MINUTE}/min) hit for {rate_key!r}",
-            "next_actions": ["wait 60 seconds before retrying"],
-        }
+        return _error(
+            "rate_limit_exceeded",
+            f"screenshot rate limit ({DEFAULT_RATE_PER_MINUTE}/min) hit for {rate_key!r}",
+            suggestion="wait 60 seconds before retrying",
+        )
     if os.name != "nt":
-        return {"error": "platform_unsupported"}
+        return _error(
+            "platform_unsupported",
+            "screenshots are only implemented on Windows",
+        )
 
     try:
         from PIL import ImageGrab  # type: ignore[import-untyped]
     except ImportError:
-        return {"error": "pillow_not_installed"}
+        return _error(
+            "internal_error",
+            "Pillow (PIL) is not installed; the screenshot backend cannot start",
+            suggestion="install the pillow dependency on the server",
+        )
 
     try:
         if mode == "window":
             if hwnd is None:
-                return {"error": "hwnd_required"}
+                return _error("invalid_args", "window mode requires an hwnd")
             # Prefer Win32 PrintWindow (with SW_RESTORE so minimized windows
             # are captured too), falling back to ImageGrab on failure. This
             # matches _capture_image so both artifact and file paths behave
@@ -126,7 +153,7 @@ def capture(
             image = picture
         elif mode == "region":
             if region is None:
-                return {"error": "region_required"}
+                return _error("invalid_args", "region mode requires a region with x, y, width and height")
             bbox = (
                 int(region["x"]),
                 int(region["y"]),
@@ -137,10 +164,14 @@ def capture(
         elif mode == "full":
             image = ImageGrab.grab()
         else:
-            return {"error": "invalid_mode", "code": "invalid_args"}
+            return _error("invalid_args", f"unknown screenshot mode {mode!r}")
     except Exception as exc:  # noqa: BLE001 — ImageGrab raises on locked desktops
-        _log.debug("screenshot capture failed: %s", exc)
-        return {"error": "capture_failed", "message": str(exc)}
+        _log.warning("screenshot capture failed: %s", exc)
+        return _error(
+            "capture_failed",
+            f"the host could not capture the screen: {exc}",
+            suggestion="check that a desktop session is available and the display is not locked",
+        )
 
     try:
         buffer = BytesIO()
@@ -152,8 +183,8 @@ def capture(
         # decoder can open. See artifacts.write()'s docstring.
         handle = artifacts.write(encoded, sensitive=True, binary=True)
     except Exception as exc:  # noqa: BLE001
-        _log.debug("screenshot artifact write failed: %s", exc)
-        return {"error": "artifact_failed", "message": str(exc)}
+        _log.warning("screenshot artifact write failed: %s", exc)
+        return _error("internal_error", f"could not store the screenshot artifact: {exc}")
 
     return {
         "handle": handle,
@@ -171,8 +202,11 @@ def _save_image(image: Any, path: str) -> dict[str, Any]:
         os.makedirs(parent, exist_ok=True)
         image.save(path, format="PNG")
     except Exception as exc:  # noqa: BLE001
-        _log.debug("screenshot save failed: %s", exc)
-        return {"error": "save_failed", "code": "invalid_path", "message": str(exc)}
+        _log.warning("screenshot save failed: %s", exc)
+        # Not `invalid_path`: the path was already validated by the tool
+        # layer, so a failure here is the host refusing to write (locked
+        # file, read-only volume, disk full) — a server-side fault.
+        return _error("internal_error", f"could not write the screenshot to {path!r}: {exc}")
     return {
         "path": os.path.abspath(path),
         "width": int(image.width),
@@ -193,16 +227,20 @@ def _capture_image(
     falling back to ``ImageGrab`` if PrintWindow yields nothing.
     """
     if os.name != "nt":
-        return {"error": "platform_unsupported"}
+        return _error("platform_unsupported", "screenshots are only implemented on Windows")
     try:
         from PIL import ImageGrab  # type: ignore[import-untyped]
     except ImportError:
-        return {"error": "pillow_not_installed"}
+        return _error(
+            "internal_error",
+            "Pillow (PIL) is not installed; the screenshot backend cannot start",
+            suggestion="install the pillow dependency on the server",
+        )
 
     try:
         if mode == "window":
             if hwnd is None:
-                return {"error": "hwnd_required"}
+                return _error("invalid_args", "window mode requires an hwnd")
             data = capture_window_bytes(hwnd=hwnd)
             if data:
                 from io import BytesIO as _B
@@ -210,11 +248,18 @@ def _capture_image(
                 return _I.open(_B(data)).convert("RGB")
             bbox = _window_bbox(hwnd)
             if bbox is None:
-                return {"error": "window_not_found"}
+                # The hwnd was authorised a moment ago but has no bounds on
+                # any display now (closed, or destroyed between the two
+                # calls). The request was valid; the host lost the subject.
+                return _error(
+                    "capture_failed",
+                    f"window {hwnd} has no visible bounds on any display",
+                    suggestion="re-run ui.list_windows and authorize a window that is still open",
+                )
             return ImageGrab.grab(bbox=bbox)
         elif mode == "region":
             if region is None:
-                return {"error": "region_required"}
+                return _error("invalid_args", "region mode requires a region with x, y, width and height")
             bbox = (
                 int(region["x"]),
                 int(region["y"]),
@@ -224,10 +269,14 @@ def _capture_image(
             return ImageGrab.grab(bbox=bbox)
         elif mode == "full":
             return ImageGrab.grab()
-        return {"error": "invalid_mode", "code": "invalid_args"}
+        return _error("invalid_args", f"unknown screenshot mode {mode!r}")
     except Exception as exc:  # noqa: BLE001
-        _log.debug("screenshot capture failed: %s", exc)
-        return {"error": "capture_failed", "message": str(exc)}
+        _log.warning("screenshot capture failed: %s", exc)
+        return _error(
+            "capture_failed",
+            f"the host could not capture the screen: {exc}",
+            suggestion="check that a desktop session is available and the display is not locked",
+        )
 
 
 def capture_to_file(
@@ -248,12 +297,11 @@ def capture_to_file(
     Returns ``{path, width, height, mode}`` or an error dict.
     """
     if not SCREENSHOT_BUCKET.check(rate_key):
-        return {
-            "error": "rate_limit",
-            "code": "rate_limit_exceeded",
-            "message": f"screenshot rate limit ({DEFAULT_RATE_PER_MINUTE}/min) hit for {rate_key!r}",
-            "next_actions": ["wait 60 seconds before retrying"],
-        }
+        return _error(
+            "rate_limit_exceeded",
+            f"screenshot rate limit ({DEFAULT_RATE_PER_MINUTE}/min) hit for {rate_key!r}",
+            suggestion="wait 60 seconds before retrying",
+        )
     image = _capture_image(mode=mode, hwnd=hwnd, region=region)
     if isinstance(image, dict):
         return image

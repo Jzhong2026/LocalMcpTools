@@ -476,10 +476,15 @@ def _proxy_tool(tool: str, args: dict[str, Any]) -> Any:
         # Tool-level errors become 4xx so the SPA can render the error
         # envelope verbatim. The audit row already records the failure.
         code = str(result["error"].get("code") or "")
-        if code in {"invalid_args", "invalid_path", "source_not_allowed"}:
+        if code in {"invalid_args", "invalid_path", "source_not_allowed", "platform_unsupported"}:
             raise HTTPException(status_code=400, detail=result["error"])
         if code in {"window_not_authorized", "workspace_not_registered"}:
             raise HTTPException(status_code=403, detail=result["error"])
+        if code == "rate_limit_exceeded":
+            # Retryable: the caller did nothing wrong, the per-agent
+            # screenshot budget is simply spent. 429 + the envelope's
+            # suggestion is the actionable answer.
+            raise HTTPException(status_code=429, detail=result["error"])
         if code == "capture_failed":
             # The source was valid; the host could not produce pixels.
             # That is a server-side fault, not a caller mistake.

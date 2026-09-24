@@ -1060,3 +1060,410 @@ class _AlwaysFailPredicate:
 
     def check(self) -> PredicateResult:
         return PredicateResult(passed=False, detail="nope")
+
+
+# --- defect 6: ui.screenshot_* soft-fail envelopes ------------------------
+#
+# The ``ui.screenshot_*`` family had the same root cause as the ``ocr.*``
+# soft-fail fixed above: the module layer returned ``{"error": ...}`` as an
+# ordinary dict, so the chokepoint wrapped it as ``ok: true`` and every real
+# failure looked like a success. ``ui.screenshot_to_file`` was the worst of
+# them — a caller could be handed ``ok: true`` for a file that was never
+# written and go on to reason about a screenshot that does not exist.
+#
+# All assertions below go through the real chokepoint (``_invoke``) because
+# calling the tool body directly cannot observe the ``ok`` flag at all.
+
+_SCREENSHOT_PARAMS_WINDOW = ["window_id"]
+_SCREENSHOT_PARAMS_FULL: list[str] = []
+_SCREENSHOT_PARAMS_REGION = ["region"]
+_SCREENSHOT_PARAMS_FILE = ["path", "workspace_id", "window_id", "region"]
+
+_LEGACY_FLAT_ERROR = {
+    "error": "rate_limit",
+    "message": "screenshot rate limit (20/min) hit for 'full'",
+    "next_actions": ["wait 60 seconds before retrying"],
+}
+
+
+def _screenshot_envelope(tool: str, logic, param_names, **kwargs):
+    return _invoke(tool, logic, param_names, **kwargs)
+
+
+def _authorized_window(monkeypatch: pytest.MonkeyPatch, hwnd: int = 4242) -> None:
+    """Pretend ``window_id`` is authorised and still resolvable.
+
+    ``tools.ui`` binds ``is_authorized`` at import time but re-imports
+    ``lookup`` inside the function body, so the two need different patch
+    targets.
+    """
+    from types import SimpleNamespace
+
+    from localmcptools.tools import ui as ui_tools
+    import localmcptools.ui.windows as windows_module
+
+    monkeypatch.setattr(ui_tools, "is_authorized", lambda **kw: True)
+    monkeypatch.setattr(
+        windows_module, "lookup", lambda **kw: SimpleNamespace(hwnd=hwnd)
+    )
+
+
+class _ExhaustedBucket:
+    """Stand-in for ``SCREENSHOT_BUCKET`` that always refuses."""
+
+    def check(self, *_args: object, **_kwargs: object) -> bool:
+        return False
+
+
+def _temp_png(name: str = "shot.png") -> str:
+    import tempfile
+
+    return str(Path(tempfile.gettempdir()) / "localmcptools" / name)
+
+
+# --- ui.screenshot_window -------------------------------------------------
+
+
+def test_screenshot_window_requires_a_window_id(database: Path) -> None:
+    from localmcptools.tools import ui as ui_tools
+
+    envelope = _screenshot_envelope(
+        "ui.screenshot_window", ui_tools.ui_screenshot_window, _SCREENSHOT_PARAMS_WINDOW
+    )
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "invalid_args"
+
+
+def test_screenshot_window_rejects_unauthorized_window(database: Path) -> None:
+    from localmcptools.tools import ui as ui_tools
+
+    envelope = _screenshot_envelope(
+        "ui.screenshot_window",
+        ui_tools.ui_screenshot_window,
+        _SCREENSHOT_PARAMS_WINDOW,
+        window_id="definitely-not-authorized",
+    )
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "window_not_authorized"
+
+
+def test_screenshot_window_translates_legacy_flat_error(
+    database: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A straggler module speaking the old bare-string dialect still
+    produces a *registered* code and keeps its message + next action."""
+    from localmcptools.tools import ui as ui_tools
+
+    _authorized_window(monkeypatch)
+    monkeypatch.setattr(
+        ui_tools.screens, "capture", lambda **kw: dict(_LEGACY_FLAT_ERROR)
+    )
+    envelope = _screenshot_envelope(
+        "ui.screenshot_window",
+        ui_tools.ui_screenshot_window,
+        _SCREENSHOT_PARAMS_WINDOW,
+        window_id="w1",
+    )
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "rate_limit_exceeded"
+    assert "rate limit" in envelope["error"]["message"]
+    assert "wait 60 seconds" in (envelope["error"].get("suggestion") or "")
+
+
+def test_screenshot_unknown_legacy_slug_stays_visible_in_message(
+    database: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Downgrading to ``internal_error`` must not erase the cause."""
+    from localmcptools.tools import ui as ui_tools
+
+    _authorized_window(monkeypatch)
+    monkeypatch.setattr(
+        ui_tools.screens,
+        "capture",
+        lambda **kw: {"error": "totally_made_up", "message": "gdi blew up"},
+    )
+    envelope = _screenshot_envelope(
+        "ui.screenshot_window",
+        ui_tools.ui_screenshot_window,
+        _SCREENSHOT_PARAMS_WINDOW,
+        window_id="w1",
+    )
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "internal_error"
+    assert "totally_made_up" in envelope["error"]["message"]
+    assert "gdi blew up" in envelope["error"]["message"]
+
+
+# --- ui.screenshot_region / ui.screenshot_full ----------------------------
+
+
+@pytest.mark.parametrize("region", [None, {}, "", "top-left"])
+def test_screenshot_region_requires_a_region(database: Path, region) -> None:
+    from localmcptools.tools import ui as ui_tools
+
+    envelope = _screenshot_envelope(
+        "ui.screenshot_region",
+        ui_tools.ui_screenshot_region,
+        _SCREENSHOT_PARAMS_REGION,
+        region=region,
+    )
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "invalid_args"
+
+
+def test_screenshot_full_rate_limit_is_a_typed_failure(
+    database: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exercises the *real* ``capture()`` — only the bucket is stubbed."""
+    from localmcptools.tools import ui as ui_tools
+
+    monkeypatch.setattr(screens_module, "SCREENSHOT_BUCKET", _ExhaustedBucket())
+    envelope = _screenshot_envelope(
+        "ui.screenshot_full", ui_tools.ui_screenshot_full, _SCREENSHOT_PARAMS_FULL
+    )
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "rate_limit_exceeded"
+    assert "rate limit" in envelope["error"]["message"]
+    assert "wait 60 seconds" in (envelope["error"].get("suggestion") or "")
+    assert envelope["data"] is None or "error" not in (envelope["data"] or {})
+
+
+def test_screenshot_full_success_is_not_turned_into_a_failure(
+    database: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other half of the guard: a real success must stay ``ok: true``."""
+    from localmcptools.tools import ui as ui_tools
+
+    monkeypatch.setattr(
+        ui_tools.screens,
+        "capture",
+        lambda **kw: {"handle": "art://x.log", "width": 8, "height": 8, "mode": "full"},
+    )
+    envelope = _screenshot_envelope(
+        "ui.screenshot_full", ui_tools.ui_screenshot_full, _SCREENSHOT_PARAMS_FULL
+    )
+    assert envelope["ok"] is True
+    assert envelope["data"]["handle"] == "art://x.log"
+
+
+# --- ui.screenshot_to_file ------------------------------------------------
+
+
+def test_screenshot_to_file_rejects_relative_path_as_invalid_path(
+    database: Path,
+) -> None:
+    """The regression that motivated this pass: a rejected path used to
+    arrive as ``internal_error`` with the reason thrown away."""
+    from localmcptools.tools import ui as ui_tools
+
+    envelope = _screenshot_envelope(
+        "ui.screenshot_to_file",
+        ui_tools.ui_screenshot_to_file,
+        _SCREENSHOT_PARAMS_FILE,
+        path="relative/shot.png",
+    )
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "invalid_path"
+    assert "absolute" in envelope["error"]["message"]
+
+
+def test_screenshot_to_file_reports_unregistered_workspace_first(
+    database: Path,
+) -> None:
+    """Ordering guard: an unknown workspace must not be blamed on the
+    path, or the caller goes off fixing a path that was never wrong."""
+    from localmcptools.tools import ui as ui_tools
+
+    envelope = _screenshot_envelope(
+        "ui.screenshot_to_file",
+        ui_tools.ui_screenshot_to_file,
+        _SCREENSHOT_PARAMS_FILE,
+        path=_temp_png("ordering.png"),
+        workspace_id="ws-does-not-exist",
+    )
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "workspace_not_registered"
+
+
+def test_screenshot_to_file_requires_authorized_window(database: Path) -> None:
+    from localmcptools.tools import ui as ui_tools
+
+    envelope = _screenshot_envelope(
+        "ui.screenshot_to_file",
+        ui_tools.ui_screenshot_to_file,
+        _SCREENSHOT_PARAMS_FILE,
+        path=_temp_png("unauthorized.png"),
+        window_id="definitely-not-authorized",
+    )
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "window_not_authorized"
+
+
+def test_screenshot_to_file_success_returns_the_written_path(
+    database: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from localmcptools.tools import ui as ui_tools
+
+    target = _temp_png("success.png")
+    monkeypatch.setattr(
+        ui_tools.screens,
+        "capture_to_file",
+        lambda **kw: {"path": target, "width": 4, "height": 4, "mode": "full"},
+    )
+    envelope = _screenshot_envelope(
+        "ui.screenshot_to_file",
+        ui_tools.ui_screenshot_to_file,
+        _SCREENSHOT_PARAMS_FILE,
+        path=target,
+    )
+    assert envelope["ok"] is True
+    assert envelope["data"]["path"] == target
+
+
+def test_screenshot_to_file_write_failure_is_a_host_fault_not_a_bad_path(
+    database: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The path already passed validation, so a write failure is the host
+    (locked file / read-only volume / full disk), not a caller mistake."""
+    from localmcptools.tools import ui as ui_tools
+
+    target = _temp_png("locked.png")
+    monkeypatch.setattr(
+        ui_tools.screens,
+        "capture_to_file",
+        lambda **kw: {
+            "error": "save_failed",
+            "message": f"could not write the screenshot to {target!r}",
+        },
+    )
+    envelope = _screenshot_envelope(
+        "ui.screenshot_to_file",
+        ui_tools.ui_screenshot_to_file,
+        _SCREENSHOT_PARAMS_FILE,
+        path=target,
+    )
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "internal_error"
+    assert "could not write" in envelope["error"]["message"]
+
+
+def test_screenshot_to_file_rate_limit_is_a_typed_failure(
+    database: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from localmcptools.tools import ui as ui_tools
+
+    monkeypatch.setattr(screens_module, "SCREENSHOT_BUCKET", _ExhaustedBucket())
+    envelope = _screenshot_envelope(
+        "ui.screenshot_to_file",
+        ui_tools.ui_screenshot_to_file,
+        _SCREENSHOT_PARAMS_FILE,
+        path=_temp_png("limited.png"),
+    )
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "rate_limit_exceeded"
+
+
+# --- cross-cutting guards -------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("tool", "param_names", "kwargs"),
+    [
+        ("ui_screenshot_window", _SCREENSHOT_PARAMS_WINDOW, {"window_id": "w1"}),
+        ("ui_screenshot_full", _SCREENSHOT_PARAMS_FULL, {}),
+        (
+            "ui_screenshot_region",
+            _SCREENSHOT_PARAMS_REGION,
+            {"region": {"x": 0, "y": 0, "width": 10, "height": 10}},
+        ),
+        (
+            "ui_screenshot_to_file",
+            _SCREENSHOT_PARAMS_FILE,
+            {"path": _temp_png("guard.png")},
+        ),
+    ],
+)
+def test_screenshot_tools_never_report_ok_with_an_error_payload(
+    database: Path, monkeypatch: pytest.MonkeyPatch, tool, param_names, kwargs
+) -> None:
+    """Meta-guard: whatever the module layer says, a failure is never
+    allowed to reach the caller as ``ok: true``."""
+    from localmcptools.tools import ui as ui_tools
+
+    _authorized_window(monkeypatch)
+    broken = {"error": "made_up_slug", "message": "synthetic failure"}
+    monkeypatch.setattr(ui_tools.screens, "capture", lambda **kw: dict(broken))
+    monkeypatch.setattr(
+        ui_tools.screens, "capture_to_file", lambda **kw: dict(broken)
+    )
+    envelope = _screenshot_envelope(
+        f"ui.{tool[len('ui_'):]}", getattr(ui_tools, tool), param_names, **kwargs
+    )
+    assert envelope["ok"] is False, f"{tool} reported a failure as success"
+    assert envelope["error"]["code"] == "internal_error"
+    assert envelope["data"] is None or "error" not in (envelope["data"] or {})
+
+
+def test_screens_module_only_uses_registered_error_codes() -> None:
+    """``_raise_if_failed`` degrades unregistered codes to
+    ``internal_error``, so a typo here silently loses the classification.
+    """
+    import inspect
+    import re
+
+    source = inspect.getsource(screens_module)
+    codes = re.findall(r"_error\(\s*['\"]([a-z_]+)['\"]", source)
+    assert codes, "no _error() call sites found — the guard is vacuous"
+    unregistered = sorted({c for c in codes if c not in STANDARD_ERROR_CODES})
+    assert not unregistered, f"unregistered error codes: {unregistered}"
+    # A code passed as a variable would escape the regex above, so also
+    # require that every call site is a literal.
+    call_sites = len(re.findall(r"(?<!def )_error\(", source))
+    assert call_sites == len(codes), (
+        "an _error() call site passes its code as a variable; "
+        "the literal-only guard no longer covers every path"
+    )
+
+
+def test_screens_module_has_no_bare_string_error_literals() -> None:
+    """``{"error": "rate_limit"}`` is the exact shape the tools layer used
+    to flatten into a contentless ``internal_error``.
+
+    Parsed as an AST rather than grepped: a docstring *mentioning* the old
+    shape is documentation, only an actual dict literal with a constant
+    string value is a live failure path.
+    """
+    import ast
+    import inspect
+
+    tree = ast.parse(inspect.getsource(screens_module))
+    offenders = [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Dict)
+        for key, value in zip(node.keys, node.values)
+        if isinstance(key, ast.Constant)
+        and key.value == "error"
+        and isinstance(value, ast.Constant)
+        and isinstance(value.value, str)
+    ]
+    assert not offenders, (
+        f"bare-string error literals at lines {offenders}; use _error(code, message)"
+    )
+
+
+def test_legacy_error_slug_map_targets_registered_codes() -> None:
+    from localmcptools.tools.ui import _LEGACY_ERROR_CODES
+
+    assert _LEGACY_ERROR_CODES, "the migration map must not be empty"
+    bad = sorted(
+        {code for code in _LEGACY_ERROR_CODES.values() if code not in STANDARD_ERROR_CODES}
+    )
+    assert not bad, f"legacy map points at unregistered codes: {bad}"
+
+
+def test_screenshot_control_codes_are_registered() -> None:
+    """``control_api`` maps these two to real HTTP statuses; if either
+    leaves the registry the HTTP layer degrades to a 200 body."""
+    assert "rate_limit_exceeded" in STANDARD_ERROR_CODES
+    assert "platform_unsupported" in STANDARD_ERROR_CODES
