@@ -31,6 +31,16 @@ _log = logging.getLogger(__name__)
 _MAX_INLINE_NODES = 500
 
 
+def _error(code: str, message: str) -> dict[str, Any]:
+    """Build a failure in the shape the envelope contract expects.
+
+    These used to be bare strings (``{"error": "platform_unsupported"}``)
+    which no caller could read a ``code`` out of. The tool layer
+    translates this into a real ``ok: false`` envelope.
+    """
+    return {"error": {"code": code, "message": message}}
+
+
 @dataclass
 class UINode:
     """Single UIA node in the structured tree shape."""
@@ -68,20 +78,29 @@ def get_tree(*, hwnd: int, depth: int = 4) -> dict[str, Any]:
     so the SPA shows a clean message.
     """
     if os.name != "nt":
-        return {"error": "platform_unsupported"}
+        return _error(
+            "not_implemented",
+            "UIA tree walking requires Windows; this host is not supported",
+        )
     try:
         import uiautomation as auto  # type: ignore[import-untyped]
     except ImportError:
-        return {"error": "uiautomation_not_installed"}
+        return _error(
+            "internal_error",
+            "the uiautomation package is not installed in this environment",
+        )
 
     try:
         root = auto.ControlFromHandle(hwnd)
         if root is None:
-            return {"error": "window_not_found"}
+            return _error(
+                "window_not_authorized",
+                f"no UIA control is attached to hwnd {hwnd}",
+            )
         root_node = _walk(root, depth=depth)
     except Exception as exc:  # noqa: BLE001
         _log.debug("get_tree failed: %s", exc)
-        return {"error": "uia_failure", "message": str(exc)}
+        return _error("internal_error", f"UIA traversal failed: {exc}")
 
     flat = list(_iter_nodes(root_node))
     total = len(flat)
@@ -110,6 +129,26 @@ def get_tree(*, hwnd: int, depth: int = 4) -> dict[str, Any]:
     }
 
 
+def _visible_flag(control: Any) -> bool:
+    """Read ``IsVisible`` without letting ``None`` mean "hidden".
+
+    ``uiautomation`` returns ``None`` — not ``False`` — when the
+    ``IsVisible`` property is unavailable for a control (several WPF and
+    WinForms hosts answer with nothing rather than a bool). ``bool(None)``
+    is ``False``, so the previous ``if child.IsVisible:`` gate silently
+    discarded every such child and ``get_tree`` returned the root node
+    alone (``total: 1``) on every app. Unknown is treated as visible;
+    only an explicit ``False`` means hidden.
+    """
+    try:
+        raw = getattr(control, "IsVisible", None)
+    except Exception:  # noqa: BLE001 — UIA can raise on a dead control
+        return True
+    if raw is None:
+        return True
+    return bool(raw)
+
+
 def _walk(control: Any, *, depth: int) -> UINode:
     """Recursive walker. Builds a :class:`UINode` from a UIA control."""
     try:
@@ -124,17 +163,17 @@ def _walk(control: Any, *, depth: int) -> UINode:
                 "width": int(rect.width()),
                 "height": int(rect.height()),
             }
-        except Exception:  # noqa: BLE001 — UIA can raise on hidden
+        except Exception as exc:  # noqa: BLE001 — UIA can raise on hidden
+            _log.debug("bounding rectangle unavailable for %r: %s", name, exc)
             bounding_box = {"x": 0, "y": 0, "width": 0, "height": 0}
         is_enabled = bool(getattr(control, "IsEnabled", True))
-        is_visible = bool(getattr(control, "IsVisible", True))
         node = UINode(
             name=name,
             automation_id=str(automation_id),
             control_type=control_type,
             bounding_box=bounding_box,
             is_enabled=is_enabled,
-            is_visible=is_visible,
+            is_visible=_visible_flag(control),
         )
     except Exception as exc:  # noqa: BLE001
         _log.debug("UIA node read failed: %s", exc)
@@ -143,13 +182,24 @@ def _walk(control: Any, *, depth: int) -> UINode:
     if depth > 0:
         try:
             children = control.GetChildren()
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            # Was `except Exception: children = []` with no logging, which
+            # made a provider-side traversal failure indistinguishable
+            # from a genuinely childless window.
+            _log.warning(
+                "GetChildren() failed for %s; this subtree is missing: %s",
+                node.control_type or type(control).__name__,
+                exc,
+            )
             children = []
+        # No visibility filter here: this is the faithful tree surface and
+        # each node already reports `isVisible`. Pruning collapsed nodes
+        # (and their subtrees) is `ui.find_element`'s job, not ours.
         for child in children or []:
             try:
-                if child.IsVisible:
-                    node.children.append(_walk(child, depth=depth - 1))
-            except Exception:  # noqa: BLE001
+                node.children.append(_walk(child, depth=depth - 1))
+            except Exception as exc:  # noqa: BLE001
+                _log.debug("skipping unreadable UIA child: %s", exc)
                 continue
     return node
 

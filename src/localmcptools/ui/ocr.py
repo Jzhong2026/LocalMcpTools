@@ -30,6 +30,7 @@ import io
 import logging
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -155,6 +156,11 @@ class WindowsOcrProvider:
             return OcrResult(blocks=[], full_text="", uncertain=True)
 
 
+# One dedicated thread so the blocking WinRT OCR call never lands on the
+# MCP server's event loop, and never spawns a thread per screenshot.
+_OCR_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="lmcp-ocr")
+
+
 def _build_engine(win_ocr: Any, win_glob: Any, win_img: Any, win_streams: Any, languages: tuple[str, ...]):
     """Helper that wires up the Windows OCR engine.
 
@@ -214,13 +220,25 @@ def _build_engine(win_ocr: Any, win_glob: Any, win_img: Any, win_streams: Any, l
             return OcrResult(blocks=blocks, full_text=full, uncertain=uncertain)
 
         try:
-            loop = asyncio.new_event_loop()
             try:
-                return loop.run_until_complete(_do())
-            finally:
-                loop.close()
+                asyncio.get_running_loop()
+            except RuntimeError:
+                # No loop on this thread — drive the coroutine directly.
+                return asyncio.run(_do())
+            # A loop is already running here, which is the normal case:
+            # the MCP server is async and tool bodies execute on its event
+            # loop thread. ``loop.run_until_complete`` on a *second* loop
+            # raises ``Cannot run the event loop while another loop is
+            # running``, the broad handler below swallowed it, and every
+            # ``ocr.*`` call returned an empty result that looked like
+            # "the screen contains no text". WinRT objects are created
+            # inside ``_do``, so running the whole thing on a dedicated
+            # worker thread keeps them on one thread from birth to death.
+            return _OCR_EXECUTOR.submit(lambda: asyncio.run(_do())).result()
         except Exception as exc:  # noqa: BLE001
-            _log.debug("OCR run failed: %s", exc)
+            # A swallowed OCR failure is indistinguishable from a blank
+            # screen, so it is a warning, not a debug line.
+            _log.warning("OCR run failed: %s: %s", type(exc).__name__, exc)
             return OcrResult(blocks=[], full_text="", uncertain=True)
 
     return _run
@@ -255,48 +273,176 @@ def reset_provider() -> None:
 # --- Tool-level helpers ----------------------------------------------------
 
 
-def _resolve_bytes(source: dict[str, Any]) -> tuple[bytes | None, str | None]:
-    """Resolve ``source`` to ``(image_bytes, artifact_handle)``.
+def _error(code: str, message: str, *, suggestion: str | None = None) -> dict[str, Any]:
+    """Build the module-level ``error`` payload shape callers expect."""
+    payload: dict[str, Any] = {"code": code, "message": message}
+    if suggestion:
+        payload["suggestion"] = suggestion
+    return {"error": payload}
 
-    Accepts:
+
+def _opt(value: Any) -> str | None:
+    """Return a non-blank source value, ignoring ``None`` / ``"None"``."""
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text or text == "None":
+        return None
+    return text
+
+
+# Magic-byte prefixes for the image containers ``BitmapDecoder`` accepts.
+# Sniffing here means a caller who points ``screenshot_handle`` at a text
+# artifact (say, one from ``output.tail``) gets a named error instead of
+# an opaque ``HRESULT -2003292336 The component cannot be found`` from
+# deep inside WinRT.
+_IMAGE_MAGICS: tuple[bytes, ...] = (
+    b"\x89PNG\r\n\x1a\n",  # PNG
+    b"\xff\xd8\xff",  # JPEG
+    b"BM",  # BMP
+    b"GIF87a",  # GIF
+    b"GIF89a",  # GIF
+    b"II*\x00",  # TIFF, little-endian
+    b"MM\x00*",  # TIFF, big-endian
+)
+
+
+def _looks_like_image(data: bytes) -> bool:
+    """True when ``data`` starts with a known image container signature."""
+    return any(data.startswith(magic) for magic in _IMAGE_MAGICS)
+
+
+def _resolve_bytes(
+    source: dict[str, Any],
+) -> tuple[bytes | None, str | None, dict[str, Any] | None]:
+    """Resolve ``source`` to ``(image_bytes, artifact_handle, error)``.
+
+    Accepts exactly one of:
 
     - ``{"window_id": "..."}`` — capture the authorised window
     - ``{"screenshot_handle": "art://..."}`` — read the artifact
 
-    Returns ``(None, None)`` when the source is unrecognised; the
-    caller turns that into a ``source_not_allowed`` error.
+    The third element is ``None`` on success. Failures are *classified*
+    rather than collapsed into one sentinel, because they have different
+    fixes:
+
+    - neither key carries a usable value → ``source_not_allowed``
+    - ``window_id`` is not in the authorisation registry → ``window_not_authorized``
+    - ``screenshot_handle`` is not a known artifact → ``artifact_not_found``
+    - ``screenshot_handle`` is a real artifact holding text, not pixels → ``invalid_args``
+    - source is valid but pixels could not be produced → ``capture_failed``
+
+    Collapsing all of these into ``(None, None)`` used to make a dead GDI
+    pipeline report "source must be a window_id or screenshot_handle",
+    sending the caller off to re-check arguments that were already right.
     """
-    if "window_id" in source:
+    window_id = _opt(source.get("window_id"))
+    handle = _opt(source.get("screenshot_handle"))
+
+    if window_id is not None:
         from .windows import lookup  # local — avoid cycle
 
-        row = lookup(window_id=str(source["window_id"]))
+        row = lookup(window_id=window_id)
         if row is None:
-            return None, None
-        return capture_window_bytes(hwnd=row.hwnd), None
-    if "screenshot_handle" in source:
+            return (
+                None,
+                None,
+                _error(
+                    "window_not_authorized",
+                    f"window_id {window_id!r} is not authorised",
+                    suggestion="call ui_authorize_window first",
+                ),
+            )
+        image_bytes = capture_window_bytes(hwnd=row.hwnd)
+        if image_bytes is None:
+            return (
+                None,
+                None,
+                _error(
+                    "capture_failed",
+                    f"could not capture pixels from authorised window hwnd={row.hwnd}",
+                    suggestion="bring the window to the foreground and retry",
+                ),
+            )
+        return image_bytes, None, None
+
+    if handle is not None:
         from ..persistence import artifacts
 
         try:
-            path = artifacts.lookup(str(source["screenshot_handle"]))
-        except Exception:  # noqa: BLE001
-            return None, None
+            path = artifacts.lookup(handle)
+        except artifacts.ArtifactNotFound:
+            return (
+                None,
+                None,
+                _error(
+                    "artifact_not_found",
+                    f"screenshot_handle {handle!r} is not a known artifact",
+                    suggestion="pass the handle returned by ui_screenshot_window",
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            return (
+                None,
+                None,
+                _error(
+                    "internal_error",
+                    f"failed to resolve screenshot_handle {handle!r}: "
+                    f"{type(exc).__name__}: {exc}",
+                ),
+            )
         if path is None:
-            return None, None
-        with open(path.path, "rb") as fh:  # type: ignore[attr-defined]
-            return fh.read(), str(source["screenshot_handle"])
-    return None, None
+            return (
+                None,
+                None,
+                _error(
+                    "artifact_not_found",
+                    f"screenshot_handle {handle!r} is not a known artifact",
+                    suggestion="pass the handle returned by ui_screenshot_window",
+                ),
+            )
+        try:
+            with open(path.path, "rb") as fh:  # type: ignore[attr-defined]
+                raw = fh.read()
+        except OSError as exc:
+            return (
+                None,
+                None,
+                _error(
+                    "capture_failed",
+                    f"could not read artifact {handle!r}: {exc}",
+                    suggestion="re-capture the window and retry",
+                ),
+            )
+        if not _looks_like_image(raw):
+            head = raw[:8].hex(" ") or "<empty>"
+            return (
+                None,
+                None,
+                _error(
+                    "invalid_args",
+                    f"screenshot_handle {handle!r} is a known artifact but "
+                    f"does not contain an image (first bytes: {head})",
+                    suggestion=(
+                        "pass the handle returned by ui_screenshot_window, "
+                        "not a text artifact from output.*"
+                    ),
+                ),
+            )
+        return raw, handle, None
+
+    return (
+        None,
+        None,
+        _error("source_not_allowed", "source must be a window_id or screenshot_handle"),
+    )
 
 
 def ocr_region(*, source: dict[str, Any]) -> dict[str, Any]:
     """Run OCR over ``source`` and return the structured result."""
-    image_bytes, handle = _resolve_bytes(source)
+    image_bytes, handle, error = _resolve_bytes(source)
     if image_bytes is None:
-        return {
-            "error": {
-                "code": "source_not_allowed",
-                "message": "source must be a window_id or screenshot_handle",
-            }
-        }
+        return error or _error("internal_error", "ocr produced no image bytes")
     provider = get_provider()
     result = provider.ocr_image(image_bytes)
     redacted_text, _ = redact(result.full_text)

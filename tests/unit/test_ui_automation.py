@@ -17,17 +17,23 @@ that contract.
 
 from __future__ import annotations
 
+import os
+import sys
 import time
 from pathlib import Path
 
 import pytest
 
+from localmcptools.execution.service import ToolExecutionService
 from localmcptools.persistence import db
 from localmcptools.safety.filters import (
     filter_titles,
     is_visible_process,
     title_blocked,
 )
+from localmcptools.tools._common import STANDARD_ERROR_CODES
+from localmcptools.ui import ocr as ocr_module
+from localmcptools.ui import screens as screens_module
 from localmcptools.ui.ocr import (
     StubProvider,
     get_provider,
@@ -142,10 +148,28 @@ def test_unknown_window_id_returns_none(database: Path) -> None:
 # --- ui.authorize_window string tolerance --------------------------------
 
 
+def _invoke(tool: str, logic, param_names, param_types=None, **kwargs):
+    """Run a tool body through the real chokepoint and return the envelope.
+
+    The regression this guards is precisely an *envelope*-level one: a
+    tool body that returns ``{"error": ...}`` instead of raising comes
+    back from the chokepoint as ``ok: true``, so only asserting on the
+    envelope catches it. Calling the body directly cannot.
+    """
+    service_path = Path(os.environ["LMCP_DATA_DIR"]) / "chokepoint.sqlite"
+    db.init_db(service_path)
+    service = ToolExecutionService(audit_path=service_path)
+    wrapper = service.register(
+        tool, logic, param_names=list(param_names), param_types=param_types
+    )
+    return wrapper(**kwargs)
+
+
 def test_authorize_window_accepts_real_int(database: Path, monkeypatch) -> None:
     from localmcptools.tools import ui as ui_tools
 
     monkeypatch.setattr(ui_tools, "authorize", lambda **kw: type("R", (), {"__dict__": kw})())
+    monkeypatch.setattr(ui_tools, "describe", lambda **kw: None)
     out = ui_tools.ui_authorize_window({"hwnd": 17176112, "title": "Code"})
     assert "error" not in out
     assert out["window"]["hwnd"] == 17176112
@@ -156,6 +180,7 @@ def test_authorize_window_accepts_numeric_string(database: Path, monkeypatch) ->
     from localmcptools.tools import ui as ui_tools
 
     monkeypatch.setattr(ui_tools, "authorize", lambda **kw: type("R", (), {"__dict__": kw})())
+    monkeypatch.setattr(ui_tools, "describe", lambda **kw: None)
     out = ui_tools.ui_authorize_window({"hwnd": "17176112", "pid": "42", "ttl_ms": "60000"})
     assert "error" not in out
     assert out["window"]["hwnd"] == 17176112
@@ -163,19 +188,380 @@ def test_authorize_window_accepts_numeric_string(database: Path, monkeypatch) ->
     assert out["window"]["ttl_ms"] == 60000
 
 
-def test_authorize_window_rejects_non_numeric_hwnd(monkeypatch) -> None:
+def test_authorize_window_rejects_non_numeric_hwnd(database: Path) -> None:
     from localmcptools.tools import ui as ui_tools
 
-    out = ui_tools.ui_authorize_window({"hwnd": "not-a-window"})
-    assert out["error"]["code"] == "invalid_args"
+    envelope = _invoke(
+        "ui.authorize_window",
+        ui_tools.ui_authorize_window,
+        ["hwnd"],
+        {"hwnd": "integer"},
+        hwnd="not-a-window",
+    )
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "invalid_args"
 
 
-def test_authorize_window_rejects_bool_hwnd(monkeypatch) -> None:
+def test_authorize_window_rejects_bool_hwnd(database: Path) -> None:
     """``True`` is an int subclass; it must not slip through as hwnd=1."""
     from localmcptools.tools import ui as ui_tools
 
-    out = ui_tools.ui_authorize_window({"hwnd": True})
-    assert out["error"]["code"] == "invalid_args"
+    envelope = _invoke(
+        "ui.authorize_window",
+        ui_tools.ui_authorize_window,
+        ["hwnd"],
+        hwnd=True,
+    )
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "invalid_args"
+
+
+# --- defect 1: authorize_window wrote the literal string "None" -----------
+
+
+def test_authorize_window_never_writes_literal_none(database: Path, monkeypatch) -> None:
+    """Regression: ``str(None)`` used to land in process/title as "None".
+
+    An omitted argument arrives from the synthesised wrapper as an
+    explicit ``None``, so ``args.get(k, "")`` never applied its default
+    and ``str(None)`` produced a non-empty string that ``if not process``
+    cannot filter out downstream.
+    """
+    from localmcptools.tools import ui as ui_tools
+
+    monkeypatch.setattr(ui_tools, "describe", lambda **kw: None)
+    out = ui_tools.ui_authorize_window({"hwnd": 4242})
+    window = out["window"]
+    assert window["process"] == ""
+    assert window["title"] == ""
+    assert "None" not in (window["process"], window["title"])
+
+
+def test_authorize_window_backfills_live_metadata(database: Path, monkeypatch) -> None:
+    """A caller that passes only ``hwnd`` still gets real metadata.
+
+    ``ui.list_windows`` and ``ui.authorize_window`` must not describe the
+    same handle differently.
+    """
+    from localmcptools.tools import ui as ui_tools
+
+    summary = type(
+        "S",
+        (),
+        {"hwnd": 4242, "process": "WorkBuddy.exe", "pid": 21996, "title": "WorkBuddy"},
+    )()
+    monkeypatch.setattr(ui_tools, "describe", lambda **kw: summary)
+    out = ui_tools.ui_authorize_window({"hwnd": 4242})
+    assert out["window"]["process"] == "WorkBuddy.exe"
+    assert out["window"]["pid"] == 21996
+    assert out["window"]["title"] == "WorkBuddy"
+
+
+def test_describe_matches_list_windows(monkeypatch) -> None:
+    """``describe`` reads the same pass ``list_windows`` exposes."""
+    from localmcptools.ui import windows
+
+    sample = [
+        windows.WindowSummary(process="A.exe", pid=1, title="A", hwnd=10),
+        windows.WindowSummary(process="B.exe", pid=2, title="B", hwnd=20),
+    ]
+    # Pin the enumeration: a live snapshot can change between the two
+    # calls, which made this test fail on transient desktop windows.
+    monkeypatch.setattr(windows, "list_windows", lambda: sample)
+    assert windows.describe(hwnd=20) == sample[1]
+    assert windows.describe(hwnd="10") == sample[0]
+    assert windows.describe(hwnd=-12345) is None
+
+
+def test_process_identity_does_not_depend_on_a_missing_uia_helper() -> None:
+    """Regression: ``uiautomation`` has no ``GetWindowProcess``.
+
+    The UIA branch used to call it inside a bare ``except``, so the
+    ``AttributeError`` vanished and *every* visible window was reported
+    as ``process=''`` / ``pid=0``. The helper must go through Win32.
+    """
+    from localmcptools.ui import windows
+
+    pytest.importorskip("uiautomation")
+    import uiautomation as auto
+
+    assert not hasattr(auto, "GetWindowProcess"), (
+        "uiautomation grew GetWindowProcess; _process_identity should be "
+        "re-checked against it and the tests revisited"
+    )
+
+    # A real, guaranteed-live window: the console/desktop root owns one.
+    name, pid = windows._process_identity(int(auto.GetRootControl().NativeWindowHandle))
+    assert pid > 0, "GetWindowThreadProcessId returned no pid"
+    assert name, "process name resolution produced an empty string"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Win32 window enumeration")
+def test_list_windows_populates_process_metadata() -> None:
+    """The live enumeration must actually resolve process + pid."""
+    from localmcptools.ui import windows
+
+    rows = windows.list_windows()
+    assert rows, "no windows enumerated"
+    named = [r for r in rows if r.process and r.pid]
+    assert named, (
+        "every enumerated window has empty process/pid — process identity "
+        "resolution is broken again: "
+        + repr([(r.process, r.pid, r.title[:30]) for r in rows[:8]])
+    )
+
+
+# --- defect 2: tree / find visibility handling ----------------------------
+
+
+class _FakeControl:
+    """Minimal UIA control stand-in.
+
+    ``IsVisible`` is settable to ``None`` on purpose: that is what
+    ``uiautomation`` returns when the property is unsupported on a host,
+    and ``bool(None)`` being ``False`` is what pruned whole subtrees.
+    """
+
+    def __init__(
+        self,
+        name: str = "",
+        *,
+        is_visible=None,
+        control_type: str = "PaneControl",
+        children: list["_FakeControl"] | None = None,
+    ) -> None:
+        self.Name = name
+        self.IsVisible = is_visible
+        self.ControlTypeName = control_type
+        self.AutomationId = ""
+        self.IsEnabled = True
+        self._children = children or []
+
+    def GetChildren(self):  # noqa: N802 — mirrors the UIA API
+        return list(self._children)
+
+
+def test_tree_visible_flag_treats_unknown_as_visible() -> None:
+    from localmcptools.ui.tree import _visible_flag
+
+    assert _visible_flag(_FakeControl(is_visible=None)) is True
+    assert _visible_flag(_FakeControl(is_visible=True)) is True
+    assert _visible_flag(_FakeControl(is_visible=False)) is False
+
+
+def test_tree_walks_children_whose_visibility_is_unknown(monkeypatch) -> None:
+    """Regression: ``if child.IsVisible:`` collapsed the tree to the root.
+
+    On real hosts ``IsVisible`` reads as ``None`` for a large share of
+    controls, so the walker returned ``total: 1`` for every app.
+    """
+    from localmcptools.ui import tree
+
+    root = _FakeControl(
+        "root",
+        is_visible=True,
+        children=[
+            _FakeControl("child-a", is_visible=None),
+            _FakeControl("child-b", is_visible=False),
+        ],
+    )
+    monkeypatch.setattr(tree.os, "name", "nt")
+    fake_module = type("M", (), {"ControlFromHandle": staticmethod(lambda h: root)})()
+    monkeypatch.setitem(sys.modules, "uiautomation", fake_module)
+    result = tree.get_tree(hwnd=1, depth=4)
+    assert "error" not in result
+    # A hidden node is still reported: the tree surface is faithful and
+    # every node carries its own `isVisible`.
+    assert result["total"] == 3
+    names = {n["name"] for n in result["nodes"]}
+    assert names == {"root", "child-a", "child-b"}
+    hidden = next(n for n in result["nodes"] if n["name"] == "child-b")
+    assert hidden["isVisible"] is False
+    unknown = next(n for n in result["nodes"] if n["name"] == "child-a")
+    assert unknown["isVisible"] is True
+
+
+def test_tree_reports_failure_with_a_readable_code(monkeypatch) -> None:
+    """Bare string errors gave no code for the envelope to carry."""
+    from localmcptools.ui import tree
+
+    monkeypatch.setattr(tree.os, "name", "posix")
+    result = tree.get_tree(hwnd=1)
+    assert result["error"]["code"] == "not_implemented"
+    assert result["error"]["message"]
+
+
+def test_find_visible_flag_treats_unknown_as_visible() -> None:
+    from localmcptools.ui.find import _visible_flag
+
+    assert _visible_flag(_FakeControl(is_visible=None)) is True
+    assert _visible_flag(_FakeControl(is_visible=False)) is False
+
+
+def test_find_drops_collapsed_matches_but_keeps_walking(monkeypatch) -> None:
+    """A collapsed element is not a click target — but may hide children."""
+    from localmcptools.ui import find
+
+    leaf = _FakeControl("Save", is_visible=True, control_type="ButtonControl")
+    collapsed = _FakeControl(
+        "panel", is_visible=False, control_type="PanelControl", children=[leaf]
+    )
+    root = _FakeControl("root", is_visible=True, children=[collapsed])
+    monkeypatch.setattr(find, "attach_to_window", lambda **kw: root)
+
+    results = find.find_element(window_id="w", text="Save", max_results=20)
+    assert [m["name"] for m in results] == ["Save"]
+    # The output dict must expose the flag `ui.get_ui_tree` already had.
+    assert [m["isVisible"] for m in results] == [True]
+
+
+def test_find_omits_collapsed_control_itself(monkeypatch) -> None:
+    from localmcptools.ui import find
+
+    root = _FakeControl(
+        "root",
+        is_visible=True,
+        children=[
+            _FakeControl("panel", is_visible=False, control_type="PanelControl"),
+            _FakeControl("OK", is_visible=None, control_type="ButtonControl"),
+        ],
+    )
+    monkeypatch.setattr(find, "attach_to_window", lambda **kw: root)
+    results = find.find_element(window_id="w", text="", max_results=20, control_type="PanelControl")
+    assert results == []
+    ok = find.find_element(window_id="w", text="OK", max_results=20)
+    assert [m["name"] for m in ok] == ["OK"]
+    assert ok[0]["isVisible"] is True
+
+
+# --- defect 3: ocr.* source resolution -----------------------------------
+
+
+def _ocr_envelope(tool, logic, param_names, **kwargs):
+    return _invoke(tool, logic, param_names, **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [
+        ({"window_id": "abc"}, {"window_id": "abc"}),
+        ({"screenshot_handle": "art://x"}, {"screenshot_handle": "art://x"}),
+        ({"window_id": None, "screenshot_handle": "art://x"}, {"screenshot_handle": "art://x"}),
+        ({"window_id": "abc", "screenshot_handle": None}, {"window_id": "abc"}),
+        ({"window_id": "  ", "screenshot_handle": "art://x"}, {"screenshot_handle": "art://x"}),
+    ],
+)
+def test_resolve_source_ignores_absent_and_blank(args, expected) -> None:
+    """Regression: the wrapper always supplies every key, so key-presence
+    was a meaningless test and ``window_id=None`` became ``"None"``."""
+    from localmcptools.tools.ocr import _resolve_source
+
+    assert _resolve_source(args, tool="ocr.ocr_region") == expected
+
+
+def test_resolve_source_requires_one_source(database: Path) -> None:
+    from localmcptools.tools.ocr import _resolve_source
+
+    envelope = _ocr_envelope(
+        "ocr.ocr_region",
+        lambda args: _resolve_source(args, tool="ocr.ocr_region"),
+        ["window_id", "screenshot_handle"],
+    )
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "invalid_args"
+
+
+def test_resolve_source_rejects_both_at_once(database: Path) -> None:
+    from localmcptools.tools.ocr import _resolve_source
+
+    envelope = _ocr_envelope(
+        "ocr.ocr_region",
+        lambda args: _resolve_source(args, tool="ocr.ocr_region"),
+        ["window_id", "screenshot_handle"],
+        window_id="abc",
+        screenshot_handle="art://x",
+    )
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "invalid_args"
+
+
+def test_ocr_region_succeeds_with_screenshot_handle(database: Path, monkeypatch) -> None:
+    """The reported failure: a real handle was rejected as no-source."""
+    from localmcptools.tools import ocr as ocr_tools
+
+    seen: dict = {}
+
+    def fake_region(*, source):
+        seen.update(source)
+        return {"blocks": [], "full_text": ""}
+
+    monkeypatch.setattr(ocr_tools.ocr_module, "ocr_region", fake_region)
+    envelope = _ocr_envelope(
+        "ocr.ocr_region",
+        ocr_tools.ocr_ocr_region,
+        ["window_id", "screenshot_handle"],
+        screenshot_handle="art://2026/calls/abc.log",
+    )
+    assert envelope["ok"] is True
+    assert seen == {"screenshot_handle": "art://2026/calls/abc.log"}
+
+
+def test_ocr_failure_is_not_reported_as_ok(database: Path) -> None:
+    """Regression: a module-layer error came back as ``ok: true``.
+
+    A caller that only checks ``ok`` read a hard OCR failure as success —
+    worse than a plain crash, because assertions turned green.
+    """
+    from localmcptools.tools import ocr as ocr_tools
+
+    envelope = _ocr_envelope(
+        "ocr.ocr_region",
+        ocr_tools.ocr_ocr_region,
+        ["window_id"],
+        window_id="definitely-not-authorized",
+    )
+    assert envelope["ok"] is False
+    # The failure is *classified*, not buried: an unresolvable window_id is
+    # an authorisation problem, and the code says so instead of blaming the
+    # argument shape the caller already got right.
+    assert envelope["error"]["code"] == "window_not_authorized"
+    assert envelope["data"] is None or "error" not in (envelope["data"] or {})
+
+
+def test_ocr_unknown_error_code_is_downgraded_not_crashed(database: Path) -> None:
+    from localmcptools.tools import ocr as ocr_tools
+
+    envelope = _ocr_envelope(
+        "ocr.ocr_region",
+        lambda args: ocr_tools._raise(
+            {"error": {"code": "made_up_code", "message": "boom"}}, tool="ocr.ocr_region"
+        ),
+        ["window_id"],
+        window_id="x",
+    )
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "internal_error"
+
+
+def test_ocr_opt_bool_survives_stringified_false() -> None:
+    """``bool("false")`` is True — that flips the answer, not the encoding."""
+    from localmcptools.tools.ocr import _opt_bool
+
+    assert _opt_bool("false") is False
+    assert _opt_bool("False") is False
+    assert _opt_bool("0") is False
+    assert _opt_bool("true") is True
+    assert _opt_bool(None) is False
+    assert _opt_bool(True) is True
+
+
+def test_new_error_codes_are_registered() -> None:
+    """The registry is the contract: unregistered codes are rejected."""
+    from localmcptools.tools._common import STANDARD_ERROR_CODES
+
+    assert "window_not_authorized" in STANDARD_ERROR_CODES
+    assert "source_not_allowed" in STANDARD_ERROR_CODES
+    assert len(set(STANDARD_ERROR_CODES)) == len(STANDARD_ERROR_CODES)
 
 
 def test_default_ttl_is_one_hour() -> None:
@@ -303,6 +689,358 @@ def test_screenshot_predicate_threshold_is_set() -> None:
 def test_ocr_predicate_carries_match() -> None:
     pred = OCRPredicate(window_id="w", expected="hello", match="exact")
     assert pred.match == "exact"
+
+
+# --- ocr source resolution: failures must stay classified ----------------
+
+
+def test_ocr_rejects_source_when_nothing_usable_is_present(monkeypatch) -> None:
+    """A wrapper-synthesised ``None`` is not a source."""
+    out = ocr_module.ocr_region(source={"window_id": "None", "screenshot_handle": None})
+    assert out["error"]["code"] == "source_not_allowed"
+
+
+def test_ocr_reports_unauthorised_window_separately(monkeypatch) -> None:
+    import localmcptools.ui.windows as windows_module
+
+    monkeypatch.setattr(windows_module, "lookup", lambda **kw: None)
+    out = ocr_module.ocr_region(source={"window_id": "not-registered"})
+    # Not "source must be a window_id or screenshot_handle": the source is
+    # well-formed, it just isn't authorised.
+    assert out["error"]["code"] == "window_not_authorized"
+    assert "ui_authorize_window" in out["error"]["suggestion"]
+
+
+def test_ocr_reports_capture_failure_separately(monkeypatch) -> None:
+    """Valid source + dead pixel pipeline must NOT blame the source."""
+    import localmcptools.ui.windows as windows_module
+
+    row = windows_module.WindowSummary(hwnd=4242, pid=7, process="x.exe", title="x")
+    monkeypatch.setattr(windows_module, "lookup", lambda **kw: row)
+    monkeypatch.setattr(ocr_module, "capture_window_bytes", lambda **kw: None)
+    out = ocr_module.ocr_region(source={"window_id": "good-id"})
+    assert out["error"]["code"] == "capture_failed"
+    assert "4242" in out["error"]["message"]
+
+
+def test_ocr_reports_unknown_artifact_separately(monkeypatch) -> None:
+    from localmcptools.persistence import artifacts
+
+    # The real ``artifacts.lookup`` *raises* for an unknown handle; a
+    # handler that only checks for ``None`` files this as internal_error.
+    def _raise(_handle: str):
+        raise artifacts.ArtifactNotFound("unknown handle")
+
+    monkeypatch.setattr(artifacts, "lookup", _raise)
+    out = ocr_module.ocr_region(source={"screenshot_handle": "art://2026/01/nope"})
+    assert out["error"]["code"] == "artifact_not_found"
+
+    monkeypatch.setattr(artifacts, "lookup", lambda handle: None)
+    out2 = ocr_module.ocr_region(source={"screenshot_handle": "art://2026/01/nope"})
+    assert out2["error"]["code"] == "artifact_not_found"
+
+
+# --- binary artifacts -------------------------------------------------------
+#
+# ``artifacts.write()`` decodes its payload as UTF-8 before redacting, which
+# replaces every byte that is not valid text with U+FFFD. Screenshots used to
+# go through that path, so ``ui_screenshot_window`` handed out a handle to a
+# file no image decoder could open — OCR then died inside WinRT with an opaque
+# ``HRESULT -2003292336``. These tests pin the binary bypass and the OCR-side
+# classification that replaces the opaque failure.
+
+
+@pytest.fixture
+def artifact_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setenv("LMCP_DATA_DIR", str(tmp_path))
+    db.init_db(tmp_path / "audit.sqlite")
+    return tmp_path
+
+
+def _png_bytes() -> bytes:
+    Image = pytest.importorskip("PIL.Image", reason="Pillow is an OCR dependency")
+    import io
+
+    buf = io.BytesIO()
+    Image.new("RGB", (4, 3), (12, 34, 56)).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def test_binary_write_rejects_non_bytes_content(artifact_db: Path) -> None:
+    from localmcptools.persistence import artifacts
+
+    with pytest.raises(TypeError, match="bytes-like"):
+        artifacts.write("not bytes", sensitive=True, binary=True)
+
+
+def test_binary_write_requires_sensitive(artifact_db: Path) -> None:
+    """Binary skips redaction, so the caller must acknowledge that."""
+    from localmcptools.persistence import artifacts
+
+    with pytest.raises(ValueError, match="sensitive=True"):
+        artifacts.write(b"\x89PNG\r\n\x1a\n", sensitive=False, binary=True)
+
+
+def test_binary_write_roundtrips_png_verbatim(artifact_db: Path) -> None:
+    from localmcptools.persistence import artifacts
+
+    png = _png_bytes()
+    handle = artifacts.write(png, sensitive=True, binary=True)
+
+    rec = artifacts.lookup(handle)
+    on_disk = Path(rec.path).read_bytes()
+    assert on_disk == png
+    assert on_disk.startswith(b"\x89PNG\r\n\x1a\n")
+    assert rec.sensitive is True
+    # Line counts are a text concept; a PNG must not claim to have any.
+    assert rec.line_count == 0
+    # The handle grammar stays ``.log`` — it is a DB key, not a filename, and
+    # parse_handle rejects anything else (pinned by test_artifact_acl).
+    assert handle.endswith(".log")
+    assert artifacts.parse_handle(handle)[1] == rec.call_id
+
+
+def test_text_write_still_decodes_and_redacts(artifact_db: Path) -> None:
+    """The non-binary path must be byte-for-byte what it was."""
+    from localmcptools.persistence import artifacts
+
+    handle = artifacts.write("token=SECRET1234567890\n", sensitive=True)
+    rec = artifacts.lookup(handle)
+    assert "SECRET1234567890" not in Path(rec.path).read_text(encoding="utf-8")
+    assert rec.line_count == 1
+
+
+def test_ocr_reads_png_artifact_handle_end_to_end(
+    artifact_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from localmcptools.persistence import artifacts
+
+    png = _png_bytes()
+    handle = artifacts.write(png, sensitive=True, binary=True)
+
+    seen: dict[str, bytes] = {}
+
+    class _Recorder:
+        name = "recorder"
+
+        def ocr_image(self, image_bytes: bytes):  # noqa: ANN001, ANN202
+            seen["bytes"] = image_bytes
+            return ocr_module.OcrResult(blocks=[], full_text="", uncertain=True)
+
+    monkeypatch.setattr(ocr_module, "get_provider", lambda: _Recorder())
+    out = ocr_module.ocr_region(source={"screenshot_handle": handle})
+
+    assert "error" not in out, out
+    assert seen["bytes"] == png
+    assert out["source_handle"] == handle
+
+
+def test_ocr_rejects_text_artifact_handle_as_invalid_args(
+    artifact_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A real artifact holding text is a named error, not an HRESULT."""
+    from localmcptools.persistence import artifacts
+
+    handle = artifacts.write("just some log output\n", sensitive=True)
+    out = ocr_module.ocr_region(source={"screenshot_handle": handle})
+    assert out["error"]["code"] == "invalid_args"
+    assert "ui_screenshot_window" in out["error"]["suggestion"]
+
+
+def test_ocr_engine_runs_from_inside_a_running_event_loop() -> None:
+    """Tool bodies execute on the MCP server's event loop thread.
+
+    The engine used to call ``run_until_complete`` on a second loop, which
+    raises ``Cannot run the event loop while another loop is running``.
+    The handler swallowed it and returned an empty result, so real OCR
+    silently read every screen as blank.
+    """
+    import asyncio
+
+    class _Rect:
+        x = y = 0
+        width = 10
+        height = 8
+
+    class _Line:
+        text = "hello"
+        confidence = 0.9
+        bounding_rect = _Rect()
+
+    class _Engine:
+        async def recognize_async(self, bitmap: object) -> object:
+            return type("R", (), {"lines": [_Line()]})()
+
+    class _Decoder:
+        async def get_software_bitmap_async(self) -> object:
+            return object()
+
+    async def _create_decoder(stream: object) -> _Decoder:
+        return _Decoder()
+
+    class _Writer:
+        def __init__(self, stream: object) -> None:
+            self._stream = stream
+
+        def write_bytes(self, payload: bytes) -> None:
+            self._payload = payload
+
+        async def store_async(self) -> None:
+            return None
+
+        async def flush_async(self) -> None:
+            return None
+
+    class _Stream:
+        def seek(self, offset: int) -> None:
+            return None
+
+    win_glob = type("G", (), {"Language": staticmethod(lambda name: name)})
+    win_ocr = type(
+        "O",
+        (),
+        {"OcrEngine": type("E", (), {"try_create_from_language": staticmethod(lambda lang: _Engine())})},
+    )
+    win_streams = type(
+        "S",
+        (),
+        {
+            "InMemoryRandomAccessStream": _Stream,
+            "DataWriter": _Writer,
+        },
+    )
+    win_img = type(
+        "I",
+        (),
+        {
+            "BitmapDecoder": type(
+                "D",
+                (),
+                {"create_async": staticmethod(_create_decoder)},
+            )
+        },
+    )
+
+    run = ocr_module._build_engine(win_ocr, win_glob, win_img, win_streams, ("en",))
+
+    async def call_from_loop() -> object:
+        return run(b"payload")
+
+    result = asyncio.run(call_from_loop())
+    assert [b.text for b in result.blocks] == ["hello"]
+    assert result.uncertain is False
+
+
+def test_ocr_assert_text_surfaces_the_classified_error(monkeypatch) -> None:
+    import localmcptools.ui.windows as windows_module
+
+    monkeypatch.setattr(windows_module, "lookup", lambda **kw: None)
+    out = ocr_module.ocr_assert_text(source={"window_id": "nope"}, expected="x")
+    assert out["passed"] is False
+    assert out["error"]["code"] == "window_not_authorized"
+
+
+def test_ocr_find_text_surfaces_the_classified_error(monkeypatch) -> None:
+    import localmcptools.ui.windows as windows_module
+
+    monkeypatch.setattr(windows_module, "lookup", lambda **kw: None)
+    out = ocr_module.ocr_find_text(query="x", source={"window_id": "nope"})
+    assert out["error"]["code"] == "window_not_authorized"
+
+
+def test_capture_failed_code_is_registered() -> None:
+    assert "capture_failed" in STANDARD_ERROR_CODES
+
+
+# --- Win32/GDI ctypes signatures ------------------------------------------
+
+
+class _FakeCtypesFn:
+    def __init__(self) -> None:
+        self.restype = None
+        self.argtypes = None
+
+
+class _FakeCtypesLib:
+    def __init__(self, names: tuple[str, ...]) -> None:
+        for name in names:
+            setattr(self, name, _FakeCtypesFn())
+
+
+def test_declare_gdi_uses_pointer_sized_handle_signatures() -> None:
+    """A 32-bit restype truncates every GDI handle on 64-bit Windows.
+
+    ``GetWindowDC`` legitimately returns values above ``2**63``; ctypes
+    defaults ``restype`` to ``c_int`` and sign-extends them into huge
+    negative ints, so the next call raises ``int too long to convert``
+    and the whole OCR feed dies. Assert the declared types, not the
+    capture result, so this runs on any host.
+    """
+    ctypes = pytest.importorskip("ctypes")
+    from ctypes import wintypes
+
+    user32 = _FakeCtypesLib(
+        (
+            "GetWindowDC",
+            "ReleaseDC",
+            "PrintWindow",
+            "IsIconic",
+            "ShowWindow",
+            "RedrawWindow",
+            "UpdateWindow",
+        )
+    )
+    gdi32 = _FakeCtypesLib(
+        (
+            "CreateCompatibleDC",
+            "CreateCompatibleBitmap",
+            "SelectObject",
+            "GetDIBits",
+            "DeleteObject",
+            "DeleteDC",
+        )
+    )
+    screens_module._declare_gdi(user32, gdi32)
+
+    pointer = ctypes.sizeof(ctypes.c_void_p)
+    assert pointer != ctypes.sizeof(ctypes.c_int), "host is not 64-bit; assertion is vacuous"
+    for lib, name in (
+        (user32, "GetWindowDC"),
+        (gdi32, "CreateCompatibleDC"),
+        (gdi32, "CreateCompatibleBitmap"),
+        (gdi32, "SelectObject"),
+    ):
+        restype = getattr(getattr(lib, name), "restype")
+        assert ctypes.sizeof(restype) == pointer, f"{name} restype is not pointer-sized"
+    assert user32.GetWindowDC.restype is wintypes.HDC
+    assert user32.GetWindowDC.argtypes == [wintypes.HWND]
+    assert gdi32.GetDIBits.argtypes[-1] is ctypes.c_uint
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Win32 capture is Windows-only")
+def test_capture_window_bytes_returns_png_for_a_real_window() -> None:
+    """The regression this whole exercise exists for: never None."""
+    import ctypes
+
+    from localmcptools.ui.windows import list_windows
+
+    target = None
+    for window in list_windows():
+        if ctypes.windll.user32.IsIconic(window.hwnd):
+            continue
+        if not window.title.strip():
+            continue
+        bbox = screens_module._window_bbox(window.hwnd)
+        if bbox and bbox[2] - bbox[0] >= 200 and bbox[3] - bbox[1] >= 200:
+            target = window
+            break
+    if target is None:
+        pytest.skip("no non-minimized, titled, >=200px window on this host")
+
+    payload = screens_module.capture_window_bytes(hwnd=target.hwnd)
+    assert payload is not None, f"capture returned None for hwnd={target.hwnd}"
+    assert payload.startswith(b"\x89PNG\r\n\x1a\n")
+    assert len(payload) > 1000
 
 
 # --- helpers used in the verify tests ------------------------------------

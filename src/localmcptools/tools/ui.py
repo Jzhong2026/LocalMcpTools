@@ -54,9 +54,9 @@ from ..ui.verify import (
     ScreenshotPredicate,
     UIAPredicate,
 )
-from ..ui.windows import authorize, is_authorized, list_windows, revoke
+from ..ui.windows import authorize, describe, is_authorized, list_windows, revoke
 from ..workspaces.registry import WorkspaceNotRegistered, resolve
-from ._common import ToolMeta, ToolResponse
+from ._common import STANDARD_ERROR_CODES, ToolMeta, ToolResponse
 from ._errors import fail
 
 _log = logging.getLogger(__name__)
@@ -91,16 +91,55 @@ def _coerce_int(value: Any) -> int | None:
     return None
 
 
+def _opt_str(value: Any) -> str | None:
+    """Return a non-blank string, or ``None`` for absent / unusable.
+
+    The synthesised MCP wrapper forwards every declared parameter, so an
+    omitted argument arrives as an explicit ``None``. ``args.get(k, "")``
+    does not help — the key is present, so the default is never used and
+    ``str(None)`` produced the literal metadata ``"None"``.
+    """
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+    return None
+
+
 def ui_authorize_window(args: dict[str, Any]) -> Any:
     """Authorize a window for subsequent ui.* tool calls."""
     hwnd = _coerce_int(args.get("hwnd"))
     if hwnd is None:
-        return {"error": {"code": "invalid_args", "message": "hwnd must be an integer"}}
-    title = str(args.get("title", ""))
-    process = str(args.get("process", ""))
+        fail(
+            code="invalid_args",
+            message="hwnd must be an integer",
+            tool="ui.authorize_window",
+            audit_id="pending",
+            run_id="pending",
+        )
+    title = _opt_str(args.get("title"))
+    process = _opt_str(args.get("process"))
     pid = _coerce_int(args.get("pid")) or 0
-    ttl_ms = _coerce_int(args.get("ttl_ms")) or 60 * 60 * 1000
-    row = authorize(hwnd=hwnd, process=process, pid=pid, title=title, ttl_ms=ttl_ms)
+
+    # Backfill whatever the caller left out from the live window, so the
+    # row this tool writes agrees with `ui.list_windows` for the same
+    # hwnd. Callers routinely pass only `hwnd`; storing empty metadata
+    # then made the two tools contradict each other.
+    summary = describe(hwnd=hwnd)
+    if summary is not None:
+        if process is None:
+            process = summary.process
+        if not pid:
+            pid = summary.pid
+        if title is None:
+            title = summary.title
+
+    row = authorize(
+        hwnd=hwnd,
+        process=process or "",
+        pid=pid,
+        title=title or "",
+        ttl_ms=_coerce_int(args.get("ttl_ms")) or 60 * 60 * 1000,
+    )
     return {"window": row.__dict__}
 
 
@@ -108,34 +147,91 @@ def ui_revoke_window(args: dict[str, Any]) -> Any:
     """Revoke an authorised window."""
     window_id = args.get("window_id")
     if not isinstance(window_id, str) or not window_id:
-        return {"error": {"code": "invalid_args", "message": "window_id is required"}}
+        fail(
+            code="invalid_args",
+            message="window_id is required",
+            tool="ui.revoke_window",
+            audit_id="pending",
+            run_id="pending",
+        )
     return {"revoked": revoke(window_id=window_id)}
 
 
 # --- Read-only tools ------------------------------------------------------
 
 
-def ui_get_ui_tree(args: dict[str, Any]) -> Any:
+def _require_window(args: dict[str, Any], *, tool: str) -> str:
+    """Validate ``window_id`` and that it is still authorised."""
     window_id = args.get("window_id")
     if not isinstance(window_id, str) or not window_id:
-        return {"error": {"code": "invalid_args", "message": "window_id is required"}}
+        fail(
+            code="invalid_args",
+            message="window_id is required",
+            tool=tool,
+            audit_id="pending",
+            run_id="pending",
+        )
     if not is_authorized(window_id=window_id):
-        return {"error": {"code": "window_not_authorized", "message": "call ui.authorize_window first"}}
-    depth = int(args.get("depth", 4))
+        fail(
+            code="window_not_authorized",
+            message="call ui.authorize_window first",
+            tool=tool,
+            audit_id="pending",
+            run_id="pending",
+        )
+    return window_id
+
+
+def _raise_if_failed(result: Any, *, tool: str) -> None:
+    """Turn a module-layer ``error`` dict into a real ``ok: false``."""
+    if not isinstance(result, dict):
+        return
+    error = result.get("error")
+    if not error:
+        return
+    if isinstance(error, str):
+        error = {"code": "internal_error", "message": error}
+    code = str(error.get("code") or "internal_error")
+    if code not in STANDARD_ERROR_CODES:
+        code = "internal_error"
+    fail(
+        code=code,
+        message=str(error.get("message") or f"{tool} failed"),
+        tool=tool,
+        audit_id="pending",
+        run_id="pending",
+    )
+    raise AssertionError("unreachable — fail() always raises")
+
+
+def ui_get_ui_tree(args: dict[str, Any]) -> Any:
+    tool = "ui.get_ui_tree"
+    window_id = _require_window(args, tool=tool)
+    # `depth: 0` is a meaningful request (root node only), so only a
+    # genuinely absent value falls back to the default.
+    depth_raw = args.get("depth")
+    depth = 4 if depth_raw is None else int(depth_raw)
     from ..ui.windows import lookup
 
     row = lookup(window_id=window_id)
     if row is None:
-        return {"error": {"code": "window_not_authorized"}}
-    return tree.get_tree(hwnd=row.hwnd, depth=depth)
+        fail(
+            code="window_not_authorized",
+            message="the authorization expired or was revoked",
+            tool=tool,
+            audit_id="pending",
+            run_id="pending",
+        )
+    result = tree.get_tree(hwnd=row.hwnd, depth=depth)
+    _raise_if_failed(result, tool=tool)
+    return result
 
 
 def ui_find_element(args: dict[str, Any]) -> Any:
-    window_id = args.get("window_id")
-    if not isinstance(window_id, str) or not window_id:
-        return {"error": {"code": "invalid_args", "message": "window_id is required"}}
-    if not is_authorized(window_id=window_id):
-        return {"error": {"code": "window_not_authorized"}}
+    tool = "ui.find_element"
+    window_id = _require_window(args, tool=tool)
+    max_raw = args.get("max_results")
+    max_results = 20 if max_raw is None else int(max_raw)
     from ..ui.find import find_element
 
     return {"matches": find_element(
@@ -144,7 +240,7 @@ def ui_find_element(args: dict[str, Any]) -> Any:
         automation_id=args.get("automationId"),
         control_type=args.get("controlType"),
         name=args.get("name"),
-        max_results=int(args.get("max_results", 20)),
+        max_results=max_results,
     )}
 
 

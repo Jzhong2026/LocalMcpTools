@@ -480,6 +480,10 @@ def _proxy_tool(tool: str, args: dict[str, Any]) -> Any:
             raise HTTPException(status_code=400, detail=result["error"])
         if code in {"window_not_authorized", "workspace_not_registered"}:
             raise HTTPException(status_code=403, detail=result["error"])
+        if code == "capture_failed":
+            # The source was valid; the host could not produce pixels.
+            # That is a server-side fault, not a caller mistake.
+            raise HTTPException(status_code=500, detail=result["error"])
         return result  # 200 with the failure envelope (preserves shape)
     return result
 

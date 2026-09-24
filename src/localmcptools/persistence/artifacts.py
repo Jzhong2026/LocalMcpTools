@@ -15,6 +15,11 @@ Pipeline on :func:`write`:
 5. If the ACL step fails, raise :class:`RedactionFailed` so the caller
    can decide whether to abort the persist.
 
+Step 1 assumes UTF-8 text. :func:`write` therefore takes a ``binary``
+flag for payloads that must survive verbatim (screenshots); see that
+function's docstring for the guarantees it gives up and the guard rails
+it adds.
+
 The ACL step is **defence-in-depth**: a compromised Python process
 can't read prior tool outputs any more than a human poking around in
 ``%APPDATA%`` could.
@@ -151,6 +156,7 @@ def write(
     sensitive: bool = False,
     path: Path | None = None,
     conn: sqlite3.Connection | None = None,
+    binary: bool = False,
 ) -> str:
     """Persist ``content`` to disk and return its handle.
 
@@ -158,25 +164,59 @@ def write(
     this into ``meta.output_handle`` and ``calls.log_path`` (after the
     audit's :func:`record_finish` is updated).
 
+    ``binary=True`` stores ``content`` verbatim. The redaction step
+    needs to decode its input as UTF-8, so handing it PNG bytes
+    corrupts them irrecoverably — every byte that is not valid UTF-8
+    is replaced with U+FFFD, so the handle ends up pointing at a file
+    no image decoder can open. Binary mode therefore skips redaction,
+    which is why it *requires* ``sensitive=True``: the caller has to
+    acknowledge that these bytes are stored unredacted and unscanned.
+    The ACL step still runs, so the file stays current-user-only.
+
+    The returned handle keeps the canonical ``.log`` spelling either
+    way. The handle is a database key, not a filename — only the
+    on-disk suffix changes (``.bin`` for binary payloads). Callers
+    must reach the bytes through :func:`lookup` (``record.path``) and
+    never by reconstructing a path from the handle string.
+
     Raises:
+        TypeError — ``binary=True`` with non-bytes content.
+        ValueError — ``binary=True`` without ``sensitive=True``.
         :class:`RedactionFailed` — if the ACL step fails (or any other
             step that prevents us from honouring the "current user
             only" guarantee). The caller MUST abort the persist in
             this case; we deliberately do not return a handle.
     """
-    if isinstance(content, bytes):
-        text = content.decode("utf-8", errors="replace")
+    if binary:
+        if not isinstance(content, (bytes, bytearray, memoryview)):
+            raise TypeError(
+                f"binary=True requires bytes-like content, got {type(content).__name__}"
+            )
+        if not sensitive:
+            raise ValueError(
+                "binary=True bypasses redaction; pass sensitive=True to "
+                "acknowledge the payload is persisted verbatim"
+            )
+        payload = bytes(content)
+        # Line counts are a text artifact concept; reporting a number
+        # for a PNG would be a lie the output.* pagers would trust.
+        line_count = 0
     else:
-        text = content
+        if isinstance(content, bytes):
+            text = content.decode("utf-8", errors="replace")
+        else:
+            text = content
 
-    # 1. Redact. Even non-sensitive content goes through (cheap, safer).
-    redacted_text, _redaction_count = redact(text)
-    payload = redacted_text.encode("utf-8")
+        # 1. Redact. Even non-sensitive content goes through (cheap, safer).
+        redacted_text, _redaction_count = redact(text)
+        payload = redacted_text.encode("utf-8")
+        line_count = payload.count(b"\n")
 
     # 2. Pick a path.
     cid = _call_id_from_arg(call_id)
     date_str = _today_str()
-    target = path if path is not None else calls_dir_for(date_str) / f"{cid}.log"
+    suffix = ".bin" if binary else ".log"
+    target = path if path is not None else calls_dir_for(date_str) / f"{cid}{suffix}"
 
     # Atomic write: tmp then rename. ``os.replace`` is atomic on Windows.
     tmp = target.with_suffix(target.suffix + ".tmp")
@@ -215,7 +255,6 @@ def write(
 
     # 4. Persist metadata row.
     bytes_total = len(payload)
-    line_count = payload.count(b"\n")
     now_ms = int(time.time() * 1000)
     handle = build_handle(date_str, cid)
 

@@ -58,6 +58,63 @@ class AuthorizedWindow:
     revoked: bool
 
 
+def _process_identity(
+    hwnd: int, *, cache: dict[int, tuple[str, int]] | None = None
+) -> tuple[str, int]:
+    """Resolve ``(process_name, pid)`` for a native window handle.
+
+    ``uiautomation`` does not expose a process-lookup helper in every
+    released version. The UIA branch of :func:`list_windows` used to call
+    one behind a bare ``except``, so the ``AttributeError`` was swallowed
+    and *every* visible window reported ``process=''`` / ``pid=0`` — the
+    metadata ``ui.authorize_window`` backfills from had nothing in it.
+    Go straight to Win32 for the pid and psutil (a hard runtime
+    dependency) for the name.
+
+    Prototypes are declared explicitly: ctypes' default ``c_int``
+    argument conversion truncates HWNDs wider than 32 bits, which would
+    quietly resolve the wrong process instead of failing. ``cache`` is
+    shared across one enumeration pass so the twenty windows a browser
+    owns cost one process lookup, not twenty.
+    """
+    key = int(hwnd)
+    if cache is not None:
+        hit = cache.get(key)
+        if hit is not None:
+            return hit
+
+    import ctypes
+    from ctypes import wintypes
+
+    result: tuple[str, int] = ("", 0)
+    try:
+        get_thread_pid = ctypes.WinDLL(
+            "user32", use_last_error=True
+        ).GetWindowThreadProcessId
+        get_thread_pid.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+        get_thread_pid.restype = wintypes.DWORD
+
+        pid = wintypes.DWORD()
+        get_thread_pid(wintypes.HWND(key), ctypes.byref(pid))
+        value = int(pid.value)
+    except (OSError, ValueError, AttributeError) as exc:  # noqa: BLE001
+        _log.debug("GetWindowThreadProcessId failed for hwnd=%s: %s", hwnd, exc)
+        value = 0
+
+    if value:
+        try:
+            import psutil  # type: ignore[import-untyped]
+
+            result = (psutil.Process(value).name() or "", value)
+        except Exception as exc:  # noqa: BLE001 — process may have exited
+            _log.debug("could not resolve process name for pid=%s: %s", value, exc)
+            result = ("", value)
+
+    if cache is not None:
+        cache[key] = result
+    return result
+
+
 def list_windows() -> list[WindowSummary]:
     """Enumerate top-level windows.
 
@@ -79,18 +136,13 @@ def list_windows() -> list[WindowSummary]:
 
     try:
         summaries: list[WindowSummary] = []
+        identity_cache: dict[int, tuple[str, int]] = {}
         for control in auto.GetRootControl().GetChildren():
             try:
                 if control.ControlType != auto.ControlType.WindowControl:
                     continue
-                process_name = ""
-                pid = 0
-                try:
-                    process_id, _name = auto.GetWindowProcess(control.NativeWindowHandle)
-                    pid = int(process_id) if process_id else 0
-                    process_name = _name or ""
-                except Exception:  # noqa: BLE001 — UIA raises per-process
-                    pass
+                hwnd = int(control.NativeWindowHandle)
+                process_name, pid = _process_identity(hwnd, cache=identity_cache)
                 if process_name and not is_visible_process(process_name):
                     continue
                 title = control.Name or ""
@@ -101,7 +153,7 @@ def list_windows() -> list[WindowSummary]:
                         process=process_name,
                         pid=pid,
                         title=title,
-                        hwnd=int(control.NativeWindowHandle),
+                        hwnd=hwnd,
                     )
                 )
             except Exception:  # noqa: BLE001 — never crash on a bad window
@@ -112,7 +164,7 @@ def list_windows() -> list[WindowSummary]:
         # hwnd the UIA pass missed.
         try:
             seen = {int(s.hwnd) for s in summaries}
-            _win32_enum_windows(summaries, seen)
+            _win32_enum_windows(summaries, seen, cache=identity_cache)
         except Exception as exc:  # noqa: BLE001
             _log.debug("list_windows win32 fallback failed: %s", exc)
         return summaries
@@ -122,7 +174,10 @@ def list_windows() -> list[WindowSummary]:
 
 
 def _win32_enum_windows(
-    summaries: list[WindowSummary], seen: set[int]
+    summaries: list[WindowSummary],
+    seen: set[int],
+    *,
+    cache: dict[int, tuple[str, int]] | None = None,
 ) -> None:
     """Supplement ``list_windows`` with minimized top-level windows.
 
@@ -134,38 +189,43 @@ def _win32_enum_windows(
     import ctypes
     from ctypes import wintypes
 
-    user32 = ctypes.windll.user32
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
 
-    @ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+    # Same reason as in _process_identity: default c_int argument
+    # conversion would truncate wide HWNDs and read the wrong window.
+    get_text_length = user32.GetWindowTextLengthW
+    get_text_length.argtypes = [wintypes.HWND]
+    get_text_length.restype = ctypes.c_int
+    get_text = user32.GetWindowTextW
+    get_text.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    get_text.restype = ctypes.c_int
+    is_visible = user32.IsWindowVisible
+    is_visible.argtypes = [wintypes.HWND]
+    is_visible.restype = wintypes.BOOL
+    enum_windows = user32.EnumWindows
+    enum_windows.argtypes = [wintypes.WNDENUMPROC, wintypes.LPARAM]
+    enum_windows.restype = wintypes.BOOL
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
     def _callback(hwnd, _lparam):
         try:
             if int(hwnd) in seen:
                 return True
-            if not user32.IsWindowVisible(hwnd):
+            if not is_visible(hwnd):
                 return True
-            pid = wintypes.DWORD()
-            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-            length = user32.GetWindowTextLengthW(hwnd)
+            length = get_text_length(hwnd)
             buf = ctypes.create_unicode_buffer(length + 1)
-            user32.GetWindowTextW(hwnd, buf, length + 1)
+            get_text(hwnd, buf, length + 1)
             title = buf.value or ""
             if title_blocked(title):
                 return True
-            # Resolve process name from pid without importing psutil.
-            process_name = ""
-            try:
-                import psutil  # type: ignore[import-untyped]
-
-                proc = psutil.Process(int(pid.value))
-                process_name = proc.name() or ""
-            except Exception:  # noqa: BLE001 — psutil optional / access denied
-                process_name = ""
+            process_name, pid = _process_identity(int(hwnd), cache=cache)
             if process_name and not is_visible_process(process_name):
                 return True
             summaries.append(
                 WindowSummary(
                     process=process_name,
-                    pid=int(pid.value),
+                    pid=pid,
                     title=title,
                     hwnd=int(hwnd),
                 )
@@ -175,7 +235,7 @@ def _win32_enum_windows(
             pass
         return True
 
-    user32.EnumWindows(_callback, 0)
+    enum_windows(_callback, 0)
 
 
 def authorize(
@@ -271,6 +331,21 @@ def is_authorized(*, window_id: str) -> bool:
     return lookup(window_id=window_id) is not None
 
 
+def describe(*, hwnd: int) -> WindowSummary | None:
+    """Resolve a live ``hwnd`` to its window metadata, or ``None``.
+
+    Reads the same :func:`list_windows` pass ``ui.list_windows`` exposes,
+    so a window can never be described one way by one tool and another
+    way by the next. ``None`` means the handle is not (or no longer) a
+    listable top-level window — minimized-and-hidden windows are included,
+    credential windows are filtered out by :func:`list_windows`.
+    """
+    for summary in list_windows():
+        if int(summary.hwnd) == int(hwnd):
+            return summary
+    return None
+
+
 def _now_ms() -> int:
     return int(time.time() * 1000)
 
@@ -280,6 +355,7 @@ __all__ = [
     "DEFAULT_TTL_MS",
     "WindowSummary",
     "authorize",
+    "describe",
     "is_authorized",
     "list_windows",
     "lookup",

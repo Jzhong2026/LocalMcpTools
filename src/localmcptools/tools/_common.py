@@ -61,6 +61,20 @@ ERR_RUNTIME_NOT_FOUND = "runtime_not_found"
 ERR_TASK_CREATE_FAILED = "task_create_failed"
 ERR_ALREADY_INSTALLED = "already_installed"
 
+# UI / OCR failure modes. Both strings were already spoken by the
+# ``ui.*`` / ``ocr.*`` tool bodies and by ``control_api``'s error-code to
+# HTTP-status mapping; promoting them into the registry is what lets the
+# tool layer raise them as a real ``ok: false`` envelope instead of
+# parking the failure inside ``data`` where callers never look.
+ERR_WINDOW_NOT_AUTHORIZED = "window_not_authorized"
+ERR_SOURCE_NOT_ALLOWED = "source_not_allowed"
+
+# A source that is *valid* (authorised window / known artifact) but whose
+# pixels could not be produced. Kept distinct from ``source_not_allowed``
+# so "you passed the wrong thing" never gets reported as "the screen
+# could not be captured" — the two have completely different fixes.
+ERR_CAPTURE_FAILED = "capture_failed"
+
 STANDARD_ERROR_CODES: tuple[str, ...] = (
     ERR_INTERNAL_ERROR,
     ERR_INVALID_ARGS,
@@ -88,6 +102,9 @@ STANDARD_ERROR_CODES: tuple[str, ...] = (
     ERR_RUNTIME_NOT_FOUND,
     ERR_TASK_CREATE_FAILED,
     ERR_ALREADY_INSTALLED,
+    ERR_WINDOW_NOT_AUTHORIZED,
+    ERR_SOURCE_NOT_ALLOWED,
+    ERR_CAPTURE_FAILED,
 )
 
 

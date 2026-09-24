@@ -30,6 +30,24 @@ class Match:
     control_type: str
     bounding_box: dict[str, int]
     score: int
+    is_visible: bool = True
+
+
+def _visible_flag(control: Any) -> bool:
+    """Read ``IsVisible``, treating an unavailable property as visible.
+
+    ``uiautomation`` returns ``None`` when the property is unsupported on
+    a host. ``bool(None)`` is ``False``, which would make a perfectly
+    good control look hidden — see the identical trap in
+    :func:`localmcptools.ui.tree._visible_flag`.
+    """
+    try:
+        raw = getattr(control, "IsVisible", None)
+    except Exception:  # noqa: BLE001 — UIA can raise on a dead control
+        return True
+    if raw is None:
+        return True
+    return bool(raw)
 
 
 def find_element(
@@ -67,6 +85,7 @@ def find_element(
             "automationId": m.automation_id,
             "controlType": m.control_type,
             "boundingBox": m.bounding_box,
+            "isVisible": m.is_visible,
             "score": m.score,
         }
         for m in results[:max_results]
@@ -81,13 +100,21 @@ def _walk(
     name_lower: str,
     out: list[Match],
 ) -> None:
-    """Depth-first walker. Populates ``out`` with every candidate."""
+    """Depth-first walker. Populates ``out`` with every candidate.
+
+    Nodes UIA explicitly reports as not visible — which includes WPF
+    ``Collapsed`` elements — are not offered as matches, because every
+    downstream action (``click`` / ``type``) targets a rendered point and
+    a collapsed element has none. Traversal continues through them either
+    way, so a collapsed container never hides a visible descendant.
+    """
     try:
         c_name = control.Name or ""
         c_auto = getattr(control, "AutomationId", None) or ""
         c_type = control.ControlTypeName or ""
+        is_visible = _visible_flag(control)
         score = _score(c_name, c_auto, c_type, text_lower, auto_id, ctrl_type, name_lower)
-        if score > 0:
+        if score > 0 and is_visible:
             try:
                 rect = control.BoundingRectangle
                 box = {
@@ -105,6 +132,7 @@ def _walk(
                     control_type=c_type,
                     bounding_box=box,
                     score=score,
+                    is_visible=is_visible,
                 )
             )
         children = control.GetChildren() or []
