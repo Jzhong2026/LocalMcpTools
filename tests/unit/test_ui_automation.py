@@ -139,6 +139,45 @@ def test_unknown_window_id_returns_none(database: Path) -> None:
     assert lookup(window_id="not-a-real-id") is None
 
 
+# --- ui.authorize_window string tolerance --------------------------------
+
+
+def test_authorize_window_accepts_real_int(database: Path, monkeypatch) -> None:
+    from localmcptools.tools import ui as ui_tools
+
+    monkeypatch.setattr(ui_tools, "authorize", lambda **kw: type("R", (), {"__dict__": kw})())
+    out = ui_tools.ui_authorize_window({"hwnd": 17176112, "title": "Code"})
+    assert "error" not in out
+    assert out["window"]["hwnd"] == 17176112
+
+
+def test_authorize_window_accepts_numeric_string(database: Path, monkeypatch) -> None:
+    """A client that stringifies every field must still succeed."""
+    from localmcptools.tools import ui as ui_tools
+
+    monkeypatch.setattr(ui_tools, "authorize", lambda **kw: type("R", (), {"__dict__": kw})())
+    out = ui_tools.ui_authorize_window({"hwnd": "17176112", "pid": "42", "ttl_ms": "60000"})
+    assert "error" not in out
+    assert out["window"]["hwnd"] == 17176112
+    assert out["window"]["pid"] == 42
+    assert out["window"]["ttl_ms"] == 60000
+
+
+def test_authorize_window_rejects_non_numeric_hwnd(monkeypatch) -> None:
+    from localmcptools.tools import ui as ui_tools
+
+    out = ui_tools.ui_authorize_window({"hwnd": "not-a-window"})
+    assert out["error"]["code"] == "invalid_args"
+
+
+def test_authorize_window_rejects_bool_hwnd(monkeypatch) -> None:
+    """``True`` is an int subclass; it must not slip through as hwnd=1."""
+    from localmcptools.tools import ui as ui_tools
+
+    out = ui_tools.ui_authorize_window({"hwnd": True})
+    assert out["error"]["code"] == "invalid_args"
+
+
 def test_default_ttl_is_one_hour() -> None:
     assert DEFAULT_TTL_MS == 60 * 60 * 1000
 

@@ -70,15 +70,36 @@ def ui_list_windows(args: dict[str, Any]) -> Any:
     return {"windows": [w.__dict__ for w in list_windows()]}
 
 
+def _coerce_int(value: Any) -> int | None:
+    """Best-effort int coercion for a value that may arrive as a string.
+
+    The tool schema now advertises ``integer`` for these params, so a
+    spec-compliant MCP client sends a real JSON number. Some clients,
+    however, stringify every field. Rather than failing the call with
+    a hard ``invalid_args``, accept a clean numeric string here.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if text and (text.isdigit() or (text.startswith("-") and text[1:].isdigit())):
+            return int(text)
+    return None
+
+
 def ui_authorize_window(args: dict[str, Any]) -> Any:
     """Authorize a window for subsequent ui.* tool calls."""
-    hwnd = args.get("hwnd")
-    if not isinstance(hwnd, int):
+    hwnd = _coerce_int(args.get("hwnd"))
+    if hwnd is None:
         return {"error": {"code": "invalid_args", "message": "hwnd must be an integer"}}
     title = str(args.get("title", ""))
     process = str(args.get("process", ""))
-    pid = int(args.get("pid") or 0)
-    ttl_ms = int(args.get("ttl_ms") or 60 * 60 * 1000)
+    pid = _coerce_int(args.get("pid")) or 0
+    ttl_ms = _coerce_int(args.get("ttl_ms")) or 60 * 60 * 1000
     row = authorize(hwnd=hwnd, process=process, pid=pid, title=title, ttl_ms=ttl_ms)
     return {"window": row.__dict__}
 

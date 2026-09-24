@@ -155,6 +155,7 @@ def _register_tools(service: ToolExecutionService) -> None:
             "the workspace are excluded; binary files are skipped."
         ),
         param_names=("workspace_id", "pattern", "max_results", "include_glob"),
+        param_types={"max_results": "integer"},
     )
 
     wrappers["fs.read_range"] = service.register(
@@ -166,6 +167,7 @@ def _register_tools(service: ToolExecutionService) -> None:
             "registered workspace."
         ),
         param_names=("workspace_id", "path", "start_line", "end_line"),
+        param_types={"start_line": "integer", "end_line": "integer"},
     )
 
     wrappers["fs.tail_log_file"] = service.register(
@@ -177,6 +179,7 @@ def _register_tools(service: ToolExecutionService) -> None:
             "workspace. Files larger than 5 MiB are streamed."
         ),
         param_names=("workspace_id", "path", "n"),
+        param_types={"n": "integer"},
     )
 
     wrappers["fs.grep_files"] = service.register(
@@ -189,6 +192,7 @@ def _register_tools(service: ToolExecutionService) -> None:
             ".venv, __pycache__, .angular."
         ),
         param_names=("workspace_id", "pattern", "include_glob", "max_results"),
+        param_types={"max_results": "integer"},
     )
 
     wrappers["output.tail"] = service.register(
@@ -200,6 +204,7 @@ def _register_tools(service: ToolExecutionService) -> None:
             "`handle`."
         ),
         param_names=("handle", "n"),
+        param_types={"n": "integer"},
     )
 
     wrappers["output.read_range"] = service.register(
@@ -211,6 +216,7 @@ def _register_tools(service: ToolExecutionService) -> None:
             "identified by `handle`."
         ),
         param_names=("handle", "start_line", "end_line"),
+        param_types={"start_line": "integer", "end_line": "integer"},
     )
 
     wrappers["output.search"] = service.register(
@@ -221,6 +227,7 @@ def _register_tools(service: ToolExecutionService) -> None:
             "Regex search inside an artifact identified by `handle`."
         ),
         param_names=("handle", "pattern", "max_results"),
+        param_types={"max_results": "integer"},
     )
 
     wrappers["workspace.git_status"] = service.register(
@@ -237,6 +244,7 @@ def _register_tools(service: ToolExecutionService) -> None:
             name, logic, title=title,
             description="Run the resolved semantic preset after human approval.",
             param_names=("workspace_id", "filter", "timeout_ms", "approval_id"),
+            param_types={"timeout_ms": "integer"},
         )
 
     wrappers["shell.run_command"] = service.register(
@@ -248,6 +256,7 @@ def _register_tools(service: ToolExecutionService) -> None:
             "one-time human approval checks. The caller's cwd is ignored."
         ),
         param_names=("workspace_id", "cmd", "timeout_ms", "env", "approval_id", "cwd"),
+        param_types={"timeout_ms": "integer", "env": "object"},
     )
 
     wrappers["process.start_dev_server"] = service.register(
@@ -255,6 +264,7 @@ def _register_tools(service: ToolExecutionService) -> None:
         title="Start managed development server",
         description="Start an approved preset inside a registered workspace and bind its lifecycle to this MCP server.",
         param_names=("workspace_id", "preset", "args", "approval_id"),
+        param_types={"args": "array"},
     )
     wrappers["process.get_status"] = service.register(
         "process.get_status", process.process_get_status,
@@ -273,6 +283,7 @@ def _register_tools(service: ToolExecutionService) -> None:
         title="Stop managed process",
         description="Stop a managed process tree after one-time human approval.",
         param_names=("id", "graceful", "approval_id"),
+        param_types={"graceful": "boolean"},
     )
     wrappers["process.list_listening_ports"] = service.register(
         "process.list_listening_ports", process.process_list_listening_ports,
@@ -285,6 +296,7 @@ def _register_tools(service: ToolExecutionService) -> None:
         title="Find TCP listener by port",
         description="Return the listener bound to a TCP port without exposing arbitrary PID termination.",
         param_names=("port",),
+        param_types={"port": "integer"},
     )
 
     wrappers["runtime.detect_runtime"] = service.register(
@@ -323,6 +335,7 @@ def _register_tools(service: ToolExecutionService) -> None:
         title="Tail VS Code log channel",
         description="Tail a named VS Code output channel log; read-only against %APPDATA%\\Code\\logs.",
         param_names=("channel", "n"),
+        param_types={"n": "integer"},
     )
     wrappers["vscode.get_debug_sessions"] = service.register(
         "vscode.get_debug_sessions", vscode.vscode_get_debug_sessions,
@@ -336,12 +349,14 @@ def _register_tools(service: ToolExecutionService) -> None:
         title="Aggregate diagnostics snapshot",
         description="One call fans out to runtime / git / problems / ports / recent failures.",
         param_names=("workspace_id", "depth", "limit"),
+        param_types={"depth": "integer", "limit": "integer"},
     )
     wrappers["diagnostics.explain_failure"] = service.register(
         "diagnostics.explain_failure", diagnostics.diagnostics_explain_failure,
         title="Explain a single run",
         description="Classify a prior run_id, pull key evidence, and emit next_actions.",
         param_names=("run_id", "row"),
+        param_types={"row": "object"},
     )
 
     # --- UI automation (change-6) ---
@@ -356,6 +371,7 @@ def _register_tools(service: ToolExecutionService) -> None:
         title="Authorize a window for UI automation",
         description="Persist a window_id UUID for subsequent ui.* / ocr.* calls. Default TTL: 60 minutes.",
         param_names=("hwnd", "title", "process", "pid", "ttl_ms"),
+        param_types={"hwnd": "integer", "pid": "integer", "ttl_ms": "integer"},
     )
     wrappers["ui.revoke_window"] = service.register(
         "ui.revoke_window", ui.ui_revoke_window,
@@ -368,12 +384,14 @@ def _register_tools(service: ToolExecutionService) -> None:
         title="Read the UIA tree of a window",
         description="Structured UIA tree; >500 nodes spill to an artifact.",
         param_names=("window_id", "depth"),
+        param_types={"depth": "integer"},
     )
     wrappers["ui.find_element"] = service.register(
         "ui.find_element", ui.ui_find_element,
         title="Find a UI element by criterion",
         description="AND combination of text / automationId / controlType / name. Top 20 matches with score.",
         param_names=("window_id", "text", "automationId", "controlType", "name", "max_results"),
+        param_types={"max_results": "integer"},
     )
     wrappers["ui.screenshot_window"] = service.register(
         "ui.screenshot_window", ui.ui_screenshot_window,
@@ -392,6 +410,7 @@ def _register_tools(service: ToolExecutionService) -> None:
         title="Screenshot a rectangular region",
         description="Capture a region {x,y,width,height}; returned as an artifact handle. Rate-limited 20/min.",
         param_names=("region",),
+        param_types={"region": "object"},
     )
     wrappers["ui.screenshot_to_file"] = service.register(
         "ui.screenshot_to_file", ui.ui_screenshot_to_file,
@@ -403,24 +422,28 @@ def _register_tools(service: ToolExecutionService) -> None:
             "Rate-limited 20/min."
         ),
         param_names=("path", "workspace_id", "window_id", "region"),
+        param_types={"region": "object"},
     )
     wrappers["ui.click_element"] = service.register(
         "ui.click_element", ui.ui_click_element,
         title="Click inside an authorised window",
         description="Click at window-local (x, y) after a verification predicate has been registered.",
         param_names=("workspace_id", "window_id", "x", "y", "button", "verify_with", "approval_id"),
+        param_types={"x": "integer", "y": "integer", "verify_with": "array"},
     )
     wrappers["ui.type_text"] = service.register(
         "ui.type_text", ui.ui_type_text,
         title="Type text into an authorised window",
         description="Type after a verification predicate has been registered.",
         param_names=("workspace_id", "window_id", "text", "interval_ms", "verify_with", "approval_id"),
+        param_types={"interval_ms": "integer", "verify_with": "array"},
     )
     wrappers["ui.act_and_verify"] = service.register(
         "ui.act_and_verify", ui.ui_act_and_verify,
         title="Atomic action + verification",
         description="Single audit row containing both the action and the verification report.",
         param_names=("workspace_id", "action_type", "action_args", "verify_with", "approval_id"),
+        param_types={"action_args": "object", "verify_with": "array"},
     )
 
     # --- OCR (change-6) ---
@@ -429,12 +452,14 @@ def _register_tools(service: ToolExecutionService) -> None:
         title="Run OCR over an authorised window or screenshot",
         description="Structured OCR blocks with bounding boxes + confidence. Provider falls back to a stub on hosts without Windows OCR.",
         param_names=("window_id", "screenshot_handle", "region"),
+        param_types={"region": "object"},
     )
     wrappers["ocr.find_text"] = service.register(
         "ocr.find_text", ocr.ocr_find_text,
         title="Search OCR output for a string",
         description="Returns matched blocks with bounding boxes; supports contains / exact / regex.",
         param_names=("window_id", "screenshot_handle", "query", "match", "fuzzy"),
+        param_types={"fuzzy": "boolean"},
     )
     wrappers["ocr.assert_text"] = service.register(
         "ocr.assert_text", ocr.ocr_assert_text,

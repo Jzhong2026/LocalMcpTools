@@ -120,6 +120,19 @@ class _Registration:
     # takes a single ``args`` dict"; a non-empty tuple means "body
     # takes those named parameters" (call site passes ``**args``).
     param_names: tuple[str, ...] = ()
+    # JSON-Schema ``type`` per parameter, keyed by parameter name.
+    # Parameters absent from this map fall back to ``Any``.
+    #
+    # This map is NOT cosmetic. Synthesising every parameter as
+    # ``Any`` makes Pydantic emit a property with no ``type`` key, and
+    # MCP clients that see an untyped property fall back to sending
+    # it as a string. That breaks every tool that validates its own
+    # argument types (e.g. ``ui.authorize_window`` rejects a
+    # stringified ``hwnd`` with "hwnd must be an integer", so the
+    # ui.* / ocr.* surface could never be called at all). Declaring
+    # the real type here is what lets the client send real JSON
+    # numbers / booleans.
+    param_types: dict[str, str] = field(default_factory=dict)
 
 
 # --- The service ---------------------------------------------------------
@@ -161,6 +174,7 @@ class ToolExecutionService:
         default_client_instance: str | None = None,
         extra_meta: dict[str, Any] | None = None,
         param_names: Sequence[str] | None = None,
+        param_types: dict[str, str] | None = None,
     ) -> Callable[..., dict[str, Any]]:
         """Register a tool. Returns a FastMCP-friendly callable.
 
@@ -172,6 +186,16 @@ class ToolExecutionService:
         expects. The wrapper synthesises a typed signature from these
         so FastMCP's schema generator can build a real JSON schema
         (rather than one that demands a single ``kwargs`` blob).
+
+        ``param_types`` maps a parameter name to its JSON-Schema
+        ``type`` (``"integer"`` / ``"number"`` / ``"boolean"`` /
+        ``"string"`` / ``"array"`` / ``"object"``). It is optional per
+        parameter — anything not listed stays ``Any``. Declaring the
+        type is what stops clients from sending every value as a
+        string; without it the generated schema carries no ``type``
+        key and tools that validate their own argument types (such as
+        ``ui.authorize_window`` and every other int-taking tool)
+        become impossible to call.
 
         ``requires_workspace`` is a hint for the UI; the chokepoint
         does NOT enforce it. Tools that genuinely need a workspace
@@ -227,6 +251,9 @@ class ToolExecutionService:
             default_client_instance=default_client_instance,
             extra_meta=dict(extra_meta or {}),
             param_names=tuple(param_names or ()),
+            param_types={
+                k: v for k, v in (param_types or {}).items() if k in set(param_names or ())
+            },
         )
         self._tools[tool] = reg
         return _make_wrapper(self, reg)
@@ -471,6 +498,19 @@ class ToolExecutionService:
 
 # --- Wrapper the FastMCP decorator uses ---------------------------------
 
+# Maps a JSON-Schema ``type`` to the Python annotation synthesised into
+# the tool wrapper's signature. Pydantic turns these back into the
+# matching JSON-Schema type, which is how the generated schema finally
+# advertises a real type instead of an untyped property.
+_JSON_TYPE_TO_ANNOTATION: dict[str, str] = {
+    "integer": "int",
+    "number": "float",
+    "boolean": "bool",
+    "string": "str",
+    "array": "list",
+    "object": "dict",
+}
+
 
 def _make_wrapper(
     service: ToolExecutionService,
@@ -506,29 +546,54 @@ def _synthesise_wrapper(
     into the module's namespace. This is the cleanest way to give a
     callable an arbitrary signature at runtime without writing a
     metaclass.
+
+    Parameters listed in ``reg.param_types`` get a real annotation
+    (``int`` / ``bool`` / ...) so Pydantic emits a ``type`` in the
+    generated JSON schema. Untyped parameters stay ``Any``. See
+    :attr:`_Registration.param_types` for why this matters.
     """
     params = list(reg.param_names)
     fn_name = f"_lmcp_tool_{reg.tool.replace('.', '_')}"
-    if params:
-        # ``value: Any = None`` per parameter; the agent can omit any
-        # field and the tool body decides whether absence is an error.
-        sig = ", ".join(f"{p}: Any = None" for p in params)
-    else:
-        sig = ""
-    body_lines = [
-        f"def {fn_name}({sig}) -> dict[str, Any]:",
-        f"    return _wrapper_invoke(_service, {reg.tool!r}, dict(",
-    ]
+    annotations: dict[str, str] = {}
     for p in params:
-        body_lines.append(f"        {p}={p},")
-    body_lines.append("    ))")
-    src = "\n".join(body_lines) + "\n"
+        declared = reg.param_types.get(p)
+        if declared in _JSON_TYPE_TO_ANNOTATION:
+            # Use the PEP 563 string form so the synthesised source
+            # resolves ``int``/``bool`` from the exec namespace.
+            annotations[p] = f"{_JSON_TYPE_TO_ANNOTATION[declared]} | None"
+        else:
+            annotations[p] = "Any"
     ns: dict[str, Any] = {
         "Any": Any,
+        "bool": bool,
         "dict": dict,
+        "float": float,
+        "int": int,
+        "list": list,
+        "str": str,
         "_wrapper_invoke": _wrapper_invoke,
         "_service": service,
     }
+    if params:
+        # ``value: <ann> = None`` per parameter; the agent can omit any
+        # field and the tool body decides whether absence is an error.
+        parts = []
+        for p in params:
+            parts.append(f"{p}: {annotations[p]} = None")
+        sig = ", ".join(parts)
+        body_lines = [
+            f"def {fn_name}({sig}) -> dict[str, Any]:",
+            f"    return _wrapper_invoke(_service, {reg.tool!r}, dict(",
+        ]
+        for p in params:
+            body_lines.append(f"        {p}={p},")
+        body_lines.append("    ))")
+        src = "\n".join(body_lines) + "\n"
+    else:
+        src = (
+            f"def {fn_name}() -> dict[str, Any]:\n"
+            f"    return _wrapper_invoke(_service, {reg.tool!r}, dict())\n"
+        )
     exec(compile(src, f"<lmcp-tool {reg.tool}>", "exec"), ns)
     fn: Callable[..., dict[str, Any]] = ns[fn_name]
     fn.__doc__ = reg.description or f"Tool: {reg.tool}"

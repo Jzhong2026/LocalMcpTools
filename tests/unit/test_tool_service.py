@@ -114,3 +114,100 @@ def test_register_full_envelope_returned(fresh_db: Path) -> None:
     # The chokepoint must overwrite audit_id/run_id to match the real run.
     assert envelope["meta"]["audit_id"] != "custom-audit"
     assert envelope["data"] == {"hello": True}
+
+
+# --- param_types: the schema must advertise real JSON types --------------
+
+
+def _schema_for(wrapper) -> dict:
+    """Build the JSON schema Pydantic generates for a synthesised wrapper."""
+    from pydantic import create_model
+    from typing import get_type_hints
+    import inspect
+
+    hints = get_type_hints(wrapper)
+    fields = {
+        name: (hints.get(name, object), None)
+        for name in inspect.signature(wrapper).parameters
+    }
+    return create_model("M", **fields).model_json_schema()
+
+
+def test_int_param_emits_integer_type_in_schema(fresh_db: Path) -> None:
+    """A param declared ``integer`` must not be schema-untyped.
+
+    Regression: the wrappers used to be synthesised as ``Any``, so
+    Pydantic emitted a property with no ``type`` key. MCP clients fall
+    back to sending untyped properties as *strings*, which made every
+    int-taking tool (e.g. ``ui.authorize_window``'s ``hwnd``) fail.
+    """
+    service = ToolExecutionService(audit_path=fresh_db)
+    wrapper = service.register(
+        "t.authorize",
+        _noop,
+        param_names=("hwnd", "ttl_ms", "title"),
+        param_types={"hwnd": "integer", "ttl_ms": "integer"},
+    )
+    schema = _schema_for(wrapper)
+    assert "integer" in str(schema["properties"]["hwnd"])
+    assert "integer" in str(schema["properties"]["ttl_ms"])
+
+
+def test_bool_and_struct_params_emit_their_types(fresh_db: Path) -> None:
+    service = ToolExecutionService(audit_path=fresh_db)
+    wrapper = service.register(
+        "t.mixed",
+        _noop,
+        param_names=("graceful", "region", "verify_with", "name"),
+        param_types={
+            "graceful": "boolean",
+            "region": "object",
+            "verify_with": "array",
+        },
+    )
+    schema = _schema_for(wrapper)
+    assert "boolean" in str(schema["properties"]["graceful"])
+    assert "object" in str(schema["properties"]["region"])
+    assert "array" in str(schema["properties"]["verify_with"])
+
+
+def test_undeclared_param_stays_any(fresh_db: Path) -> None:
+    """Backwards compat: params without a declared type remain ``Any``."""
+    service = ToolExecutionService(audit_path=fresh_db)
+    wrapper = service.register(
+        "t.partial",
+        _noop,
+        param_names=("hwnd", "label"),
+        param_types={"hwnd": "integer"},
+    )
+    schema = _schema_for(wrapper)
+    assert "integer" in str(schema["properties"]["hwnd"])
+    assert "type" not in schema["properties"]["label"]
+
+
+def test_no_param_tool_still_builds(fresh_db: Path) -> None:
+    service = ToolExecutionService(audit_path=fresh_db)
+    wrapper = service.register("t.bare", _noop, param_names=())
+    envelope = wrapper()
+    assert envelope["ok"] is True
+
+
+def test_wrapper_accepts_real_int(fresh_db: Path) -> None:
+    """The wrapper must pass a real int through to the tool body."""
+    seen: dict = {}
+
+    def capture_int(args):
+        seen.update(args)
+        return {"ok": True}
+
+    service = ToolExecutionService(audit_path=fresh_db)
+    wrapper = service.register(
+        "t.int",
+        capture_int,
+        param_names=("hwnd",),
+        param_types={"hwnd": "integer"},
+    )
+    wrapper(hwnd=17176112)
+    assert seen["hwnd"] == 17176112
+    assert isinstance(seen["hwnd"], int)
+
