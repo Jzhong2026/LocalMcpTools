@@ -41,6 +41,14 @@ def test_data_dir_idempotent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
     assert paths.data_dir() == paths.data_dir() == tmp_path
 
 
+def test_private_json_is_owner_readable(tmp_path: Path) -> None:
+    target = tmp_path / "server.json"
+    paths.write_private_json(target, {"mcp_bearer": "secret"})
+    assert json.loads(target.read_text(encoding="utf-8"))["mcp_bearer"] == "secret"
+    if os.name != "nt":
+        assert target.stat().st_mode & 0o777 == 0o600
+
+
 def test_audit_db_path_is_under_data_dir(isolated_data_dir: Path) -> None:
     assert paths.audit_db_path() == isolated_data_dir / "audit.sqlite"
 

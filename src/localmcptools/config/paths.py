@@ -14,8 +14,10 @@ or :func:`audit_db_path`, which lazily materialises the folder.
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
+from typing import Any
 
 # Environment variable used to override the data directory (tests, portable installs).
 ENV_OVERRIDE = "LMCP_DATA_DIR"
@@ -63,6 +65,22 @@ def server_json_path() -> Path:
     Not written during the bootstrap spike (stdio mode has no listener).
     """
     return data_dir() / "server.json"
+
+
+def write_private_json(path: Path, payload: dict[str, Any]) -> None:
+    """Write JSON readable only by the current user (mode 0600).
+
+    On Windows the mode bits are not a full ACL. Keep the file under the
+    user profile and do not serve it over HTTP.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = json.dumps(payload).encode("utf-8")
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.write(fd, data)
+    finally:
+        os.close(fd)
+    os.chmod(path, 0o600)
 
 
 def logs_dir() -> Path:

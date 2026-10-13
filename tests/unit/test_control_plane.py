@@ -19,6 +19,9 @@ from localmcptools.control_api import router
 from localmcptools.persistence import db
 from localmcptools.transport import SecurityContext, mount_app
 
+ADMIN = "admin-secret-test-value"
+MCP = "mcp-bearer-test-value"
+
 
 @pytest.fixture
 def control_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FastAPI:
@@ -27,19 +30,40 @@ def control_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     db.init_db(tmp_path / "audit.sqlite")
     app = FastAPI()
     ctx = SecurityContext(
-        token="test-token",
+        mcp_bearer=MCP,
+        admin_secret=ADMIN,
         origin_allowlist=("http://127.0.0.1", "http://localhost"),
+        allowed_hosts=("testserver",),
     )
     mount_app(app=app, context=ctx, control_router=router, mcp_asgi_app=None, static_dir=None)
     return app
 
 
 def _origin_client(app: FastAPI) -> httpx.AsyncClient:
-    return httpx.AsyncClient(
+    """Logged-in control-plane client. Enter with ``async with``."""
+    client = httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://testserver",
         headers={"Origin": "http://127.0.0.1"},
     )
+    return _LoggedIn(client)
+
+
+class _LoggedIn:
+    """Async context manager that signs in before yielding the client."""
+
+    def __init__(self, client: httpx.AsyncClient) -> None:
+        self._client = client
+
+    async def __aenter__(self) -> httpx.AsyncClient:
+        await self._client.__aenter__()
+        response = await self._client.post("/api/login", json={"token": ADMIN})
+        assert response.status_code == 200, response.text
+        self._client.headers["X-LMCP-CSRF"] = response.json()["csrf_token"]
+        return self._client
+
+    async def __aexit__(self, *exc: object) -> None:
+        await self._client.__aexit__(*exc)
 
 
 # --- /status --------------------------------------------------------------
@@ -75,15 +99,9 @@ async def test_settings_post_persists_to_disk(
 ) -> None:
     monkeypatch.setenv("LMCP_DATA_DIR", str(tmp_path))
     async with _origin_client(control_app) as client:
-        # Bootstrap CSRF.
-        await client.get("/api/csrf-token")
-        cookie = client.cookies.get("lmcp_csrf")
-        assert cookie is not None, "csrf cookie must be set after /api/csrf-token"
-        assert cookie == "test-token"
         r = await client.post(
             "/api/settings",
             json={"patch": {"security": {"redact_before_persist": False}}},
-            headers={"X-LMCP-CSRF": cookie},
         )
     assert r.status_code == 200
     body = r.json()
@@ -99,13 +117,9 @@ async def test_settings_post_marks_restart_keys(
 ) -> None:
     monkeypatch.setenv("LMCP_DATA_DIR", str(tmp_path))
     async with _origin_client(control_app) as client:
-        await client.get("/api/csrf-token")
-        cookie = client.cookies.get("lmcp_csrf")
-        assert cookie is not None, "csrf cookie must be set after /api/csrf-token"
         r = await client.post(
             "/api/settings",
             json={"patch": {"server": {"port": 9999}}},
-            headers={"X-LMCP-CSRF": cookie},
         )
     assert r.status_code == 200
     body = r.json()
@@ -203,10 +217,7 @@ async def test_rules_list_returns_builtins(control_app: FastAPI) -> None:
 @pytest.mark.asyncio
 async def test_rules_reload_succeeds(control_app: FastAPI) -> None:
     async with _origin_client(control_app) as client:
-        await client.get("/api/csrf-token")
-        cookie = client.cookies.get("lmcp_csrf")
-        assert cookie is not None, "csrf cookie must be set after /api/csrf-token"
-        r = await client.post("/api/rules/reload", headers={"X-LMCP-CSRF": cookie})
+        r = await client.post("/api/rules/reload")
     assert r.status_code == 200
     assert r.json()["reloaded"] == 10
 
@@ -214,13 +225,9 @@ async def test_rules_reload_succeeds(control_app: FastAPI) -> None:
 @pytest.mark.asyncio
 async def test_rules_toggle_unknown_id_returns_404(control_app: FastAPI) -> None:
     async with _origin_client(control_app) as client:
-        await client.get("/api/csrf-token")
-        cookie = client.cookies.get("lmcp_csrf")
-        assert cookie is not None, "csrf cookie must be set after /api/csrf-token"
         r = await client.patch(
             "/api/rules/does-not-exist",
             json={"enabled": False},
-            headers={"X-LMCP-CSRF": cookie},
         )
     assert r.status_code == 404
 
@@ -228,28 +235,22 @@ async def test_rules_toggle_unknown_id_returns_404(control_app: FastAPI) -> None
 @pytest.mark.asyncio
 async def test_rules_toggle_disables_then_re_enables(control_app: FastAPI) -> None:
     async with _origin_client(control_app) as client:
-        await client.get("/api/csrf-token")
-        cookie = client.cookies.get("lmcp_csrf")
-        assert cookie is not None, "csrf cookie must be set after /api/csrf-token"
         r = await client.patch(
             "/api/rules/block-format-volume",
             json={"enabled": False},
-            headers={"X-LMCP-CSRF": cookie},
         )
         assert r.status_code == 200
-        # Now the engine should not match the disabled rule.
+        # A fresh engine (what shell.run_command builds per call) must
+        # observe the persisted disable, not an empty in-memory set.
         from localmcptools.safety.rules import RuleEngine
 
         engine = RuleEngine()
         engine.reload()
-        assert (
-            engine.match("Format-Volume -DriveLetter C") is not None
-        )  # engine doesn't share state, but shows it would
+        assert engine.match("Format-Volume -DriveLetter C") is None
         # Re-enable
         r = await client.patch(
             "/api/rules/block-format-volume",
             json={"enabled": True},
-            headers={"X-LMCP-CSRF": cookie},
         )
         assert r.status_code == 200
 
@@ -284,10 +285,7 @@ async def test_mcp_config_snippet_returns_three_targets(control_app: FastAPI) ->
 @pytest.mark.asyncio
 async def test_shutdown_returns_ok_in_standalone_mode(control_app: FastAPI) -> None:
     async with _origin_client(control_app) as client:
-        await client.get("/api/csrf-token")
-        cookie = client.cookies.get("lmcp_csrf")
-        assert cookie is not None, "csrf cookie must be set after /api/csrf-token"
-        r = await client.post("/api/shutdown", headers={"X-LMCP-CSRF": cookie})
+        r = await client.post("/api/shutdown")
     assert r.status_code == 200
     assert r.json()["ok"] is True
 
@@ -298,11 +296,10 @@ async def test_shutdown_returns_ok_in_standalone_mode(control_app: FastAPI) -> N
 @pytest.mark.asyncio
 async def test_proxy_tool_unknown_tool_returns_501(control_app: FastAPI) -> None:
     """The proxy returns 501 for an unregistered tool name."""
-    async with await _csrf_client(control_app) as client:
+    async with _origin_client(control_app) as client:
         r = await client.post(
             "/api/ui/get_ui_tree",
             json={"window_id": "no-such-window"},
-            headers={"X-LMCP-CSRF": "test-token"},
         )
     # Unknown tool → 501; the SPA renders the detail as an error.
     assert r.status_code == 501
@@ -310,17 +307,100 @@ async def test_proxy_tool_unknown_tool_returns_501(control_app: FastAPI) -> None
     assert body["detail"]["code"] == "not_implemented"
 
 
-async def _csrf_client(app: FastAPI) -> httpx.AsyncClient:
-    """Client with both Origin + CSRF cookie + header set up."""
-    client = _origin_client(app)
-    client.cookies.set("lmcp_csrf", "test-token")
-    return client
-
-
 # --- save_settings helper -------------------------------------------------
 
 
 # --- save_settings helper -------------------------------------------------
+
+
+# --- hostile clients ------------------------------------------------------
+
+
+def _anonymous(app: FastAPI) -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    )
+
+
+@pytest.mark.asyncio
+async def test_forged_origin_cannot_read_settings_or_tokens(control_app: FastAPI) -> None:
+    async with _anonymous(control_app) as client:
+        response = await client.get(
+            "/api/settings",
+            headers={"Origin": "http://evil.example"},
+        )
+    assert response.status_code == 403
+    assert response.json()["code"] == "origin_denied"
+    assert MCP not in response.text
+    assert ADMIN not in response.text
+
+
+@pytest.mark.asyncio
+async def test_mcp_bearer_cannot_approve_shutdown_or_read_audit(control_app: FastAPI) -> None:
+    headers = {
+        "Origin": "http://127.0.0.1",
+        "Authorization": f"Bearer {MCP}",
+        "X-LMCP-CSRF": MCP,
+    }
+    async with _anonymous(control_app) as client:
+        client.cookies.set("lmcp_csrf", MCP)
+        audit = await client.get("/api/audit", headers=headers)
+        approve = await client.post("/api/approvals/any/approve", headers=headers)
+        shutdown = await client.post("/api/shutdown", headers=headers)
+        snippet = await client.get("/api/mcp-config-snippet", headers=headers)
+    assert audit.status_code == 401
+    assert approve.status_code == 401
+    assert shutdown.status_code == 401
+    assert snippet.status_code == 401
+    for response in (audit, approve, shutdown, snippet):
+        assert MCP not in response.text
+        assert ADMIN not in response.text
+
+
+@pytest.mark.asyncio
+async def test_authenticated_snippet_contains_mcp_bearer_only(control_app: FastAPI) -> None:
+    async with _origin_client(control_app) as client:
+        response = await client.get("/api/mcp-config-snippet")
+    assert response.status_code == 200
+    assert MCP in response.text
+    assert ADMIN not in response.text
+
+
+@pytest.mark.asyncio
+async def test_settings_reject_non_loopback_bind(
+    control_app: FastAPI, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LMCP_DATA_DIR", str(tmp_path))
+    async with _origin_client(control_app) as client:
+        response = await client.post(
+            "/api/settings",
+            json={"patch": {"server": {"host": "0.0.0.0"}, "security": {"allowed_hosts": ["evil.example"]}}},
+        )
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "host_not_loopback"
+    saved = tmp_path / "config.json"
+    assert not saved.exists() or "0.0.0.0" not in saved.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_allowed_host_patch_applies_to_the_running_server(control_app: FastAPI) -> None:
+    async with _origin_client(control_app) as client:
+        saved = await client.post(
+            "/api/settings",
+            json={"patch": {"security": {"allowed_hosts": ["xyz.trycloudflare.com"]}}},
+        )
+        assert saved.status_code == 200
+        response = await client.get("/api/status", headers={"Host": "xyz.trycloudflare.com"})
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_bad_host_blocks_authenticated_shutdown(control_app: FastAPI) -> None:
+    async with _origin_client(control_app) as client:
+        response = await client.post("/api/shutdown", headers={"Host": "evil.example"})
+    assert response.status_code == 403
+    assert response.json()["code"] == "host_denied"
 
 
 def test_save_settings_round_trip(tmp_path: Path) -> None:

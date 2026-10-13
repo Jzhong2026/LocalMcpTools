@@ -70,7 +70,7 @@ def shell_run_command(args: dict[str, Any]) -> ToolResponse:
     digest = digest_for("shell.run_command", args, workspace.id, profile.value)
     preview = {"command_resolved": command, "cwd": workspace.canonical_root}
     if not isinstance(approval_id, str) or not approval_id:
-        item = request(workspace.id, capability, args, profile=profile.value)
+        item = request(workspace.id, capability, args, profile=profile.value, preview=preview)
         fail(code="approval_required", message="human approval is required before running this command", tool="shell.run_command", audit_id="pending", run_id="pending", workspace_id=workspace.id, approval_id=item.id, data=preview, next_actions=["review the resolved command and working directory, then approve and retry"])
     approval_id = cast(str, approval_id)
     try:

@@ -34,7 +34,11 @@ import { RuleSummary } from '../../core/models';
             <td>{{ rule.severity }}</td>
             <td>{{ hitCount(rule.id) }}</td>
             <td>{{ rule.suggestion }}</td>
-            <td><button (click)="toggle(rule.id)">toggle</button></td>
+            <td>
+              <button (click)="toggle(rule)">
+                {{ rule.enabled ? 'Disable' : 'Enable' }}
+              </button>
+            </td>
           </tr>
         }
       </tbody>
@@ -51,7 +55,6 @@ export class RulesListComponent implements OnInit {
   readonly rules = signal<RuleSummary[]>([]);
   readonly hitStats = signal<Record<string, { hit_count: number }>>({});
   readonly reloadResult = signal<{ reloaded: number } | null>(null);
-  readonly disabled = signal<Set<string>>(new Set());
 
   async ngOnInit(): Promise<void> {
     await this.reload();
@@ -69,13 +72,10 @@ export class RulesListComponent implements OnInit {
     return this.hitStats()[id]?.hit_count ?? 0;
   }
 
-  async toggle(id: string): Promise<void> {
-    const disabled = this.disabled();
-    const next = new Set(disabled);
-    const willEnable = next.has(id);
-    if (willEnable) next.delete(id);
-    else next.add(id);
-    this.disabled.set(next);
-    await this.api.ruleToggle(id, willEnable);
+  async toggle(rule: RuleSummary): Promise<void> {
+    await this.api.ruleToggle(rule.id, !rule.enabled);
+    const body = await this.api.rulesList();
+    this.rules.set(body.rules);
+    this.hitStats.set(body.hit_stats);
   }
 }

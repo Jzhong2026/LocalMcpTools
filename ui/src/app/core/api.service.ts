@@ -3,6 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 
 import {
+  ApprovalSummary,
   AuditList,
   AuthorizedWindow,
   BackgroundSummary,
@@ -10,11 +11,11 @@ import {
   OcrBlock,
   OcrRegion,
   RulesList,
-  RuleSummary,
   StatusPayload,
   UiFindMatch,
   UiTree,
   WindowSummary,
+  WorkspaceSummary,
 } from './models';
 
 /**
@@ -81,6 +82,41 @@ export class ApiService {
     return firstValueFrom(
       this.http.post<{ reloaded: number; errors: Array<Record<string, string>> }>(
         '/api/rules/reload',
+        {},
+      ),
+    );
+  }
+
+  workspacesList(): Promise<{ workspaces: WorkspaceSummary[] }> {
+    return firstValueFrom(
+      this.http.get<{ workspaces: WorkspaceSummary[] }>('/api/workspaces'),
+    );
+  }
+
+  setWorkspaceProfile(
+    workspaceId: string,
+    profile: string,
+  ): Promise<{ workspace_id: string; profile: string }> {
+    return firstValueFrom(
+      this.http.post<{ workspace_id: string; profile: string }>(
+        `/api/workspaces/${workspaceId}/profile`,
+        { profile },
+      ),
+    );
+  }
+
+  approvalsList(status: string = 'pending'): Promise<{ approvals: ApprovalSummary[] }> {
+    return firstValueFrom(
+      this.http.get<{ approvals: ApprovalSummary[] }>('/api/approvals', {
+        params: { status },
+      }),
+    );
+  }
+
+  approve(approvalId: string): Promise<{ id: string; status: string }> {
+    return firstValueFrom(
+      this.http.post<{ id: string; status: string }>(
+        `/api/approvals/${approvalId}/approve`,
         {},
       ),
     );

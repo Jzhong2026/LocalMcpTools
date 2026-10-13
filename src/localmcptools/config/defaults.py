@@ -25,6 +25,11 @@ DEFAULTS: dict[str, Any] = {
         # Sensitive values are redacted before they touch the audit log
         # or any artifact. This is a hard invariant for the spike.
         "redact_before_persist": True,
+        # Browser origins allowed to call /api. Loopback is always
+        # accepted on any port; add the tunnel origin here before using it.
+        "origin_allowlist": ["http://127.0.0.1", "http://localhost"],
+        # Extra Host names besides loopback, for example a cloudflared hostname.
+        "allowed_hosts": [],
     },
     "workspaces": {
         # Default capability profile. ``observe`` is read-only; any

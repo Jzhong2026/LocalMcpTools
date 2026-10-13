@@ -31,7 +31,6 @@ import httpx
 import pytest
 
 from localmcptools.safety.rules import RuleEngine
-
 from tests.e2e.conftest import HttpHarness
 from tests.e2e.policy_rules import RULE_CASES, RuleCase
 
@@ -101,7 +100,10 @@ def test_all_rules_loaded_via_http(live_server_http: HttpHarness) -> None:
     """GET /api/rules must list every built-in rule id."""
     r = httpx.get(
         f"{live_server_http.base_url}/api/rules",
-        headers={"Origin": live_server_http.origin},
+        headers={
+            "Origin": live_server_http.origin,
+            "Cookie": live_server_http.csrf_cookie,
+        },
         timeout=10,
     )
     assert r.status_code == 200, r.text
@@ -179,7 +181,7 @@ def test_disable_and_re_enable_round_trip(live_server_http: HttpHarness) -> None
 
 def test_rule_coverage_summary() -> None:
     """Print the rule matrix once per run for CI dashboards."""
-    print(f"\n=== Built-in deny rule coverage ===")
+    print("\n=== Built-in deny rule coverage ===")
     print(f"  rules verified: {len(RULE_CASES)}")
     for c in RULE_CASES:
         print(f"  - {c.rule_id:<32} severity={c.severity}")

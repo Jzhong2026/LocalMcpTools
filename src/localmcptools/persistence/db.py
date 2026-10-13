@@ -183,7 +183,16 @@ AUTHORIZED_WINDOWS_INDEXES_V5 = (
     "CREATE INDEX IF NOT EXISTS idx_authorized_windows_revoked ON authorized_windows(revoked);",
 )
 
-CURRENT_SCHEMA_VERSION = 5
+# Schema v6: human-readable approval previews, and persisted rule enablement.
+# ``approvals.preview`` is added with ALTER so existing v3 databases migrate.
+RULE_OVERRIDES_SCHEMA_V6 = """
+CREATE TABLE IF NOT EXISTS rule_overrides (
+    rule_id             TEXT PRIMARY KEY,
+    enabled             INTEGER NOT NULL
+);
+"""
+
+CURRENT_SCHEMA_VERSION = 6
 
 
 # --- Connection factory ---------------------------------------------------
@@ -300,6 +309,17 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute(ddl)
         _write_schema_version(conn, 5)
         current = 5
+
+    if current < 6:
+        _log.info("applying schema migration -> v6 (approval preview + rule overrides)")
+        approval_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(approvals)").fetchall()
+        }
+        if "preview" not in approval_columns:
+            conn.execute("ALTER TABLE approvals ADD COLUMN preview TEXT")
+        conn.execute(RULE_OVERRIDES_SCHEMA_V6)
+        _write_schema_version(conn, 6)
+        current = 6
 
     if current != CURRENT_SCHEMA_VERSION:
         raise RuntimeError(

@@ -48,7 +48,7 @@ _BODY_PRINT_CHARS = 400
 
 def _load_token() -> tuple[str, int]:
     cfg: dict[str, Any] = json.loads((DATA_DIR / "server.json").read_text(encoding="utf-8"))
-    return cfg["csrf_token"], int(cfg["port"])
+    return cfg["mcp_bearer"], int(cfg["port"])
 
 
 async def _call(session: ClientSession, tool: str, args: dict[str, Any]) -> dict[str, Any]:

@@ -1,64 +1,90 @@
-"""HTTP transport — Bearer (MCP) + Origin / CSRF (control plane).
+"""HTTP transport — separate MCP bearer and control-plane session.
 
-Two enforcement surfaces:
+Two secrets, two surfaces:
 
-- ``/mcp``      — Streamable HTTP MCP endpoint. Requires ``Authorization:
-  Bearer <token>``. Origin / Host checks are *not* required here because
-  the MCP protocol is JSON-RPC over HTTP, not a browser context; agents
-  running over stdio can also reach this endpoint.
+- ``/mcp`` uses ``mcp_bearer`` (``Authorization: Bearer``). That secret
+  never authorizes ``/api/*``.
+- ``/api/*`` requires a control-plane session. A session is created only
+  by presenting the admin secret (``POST /api/login``) or a one-time
+  login nonce (``GET /api/login?token=``). The session id lives in an
+  HttpOnly ``lmcp_session`` cookie. Unsafe methods also send
+  ``X-LMCP-CSRF``, which is a per-session value and is not either secret.
 
-- ``/api/*``    — Control plane for the Angular SPA. Requires the
-  ``Origin`` header to be in the configured allowlist, and unsafe methods
-  (POST / PATCH / DELETE) additionally require ``X-LMCP-CSRF`` to match
-  the ``lmcp_csrf`` cookie. The cookie is ``HttpOnly``; the SPA fetches
-  ``/api/csrf-token`` once on bootstrap and adds the matching header on
-  every subsequent unsafe request.
-
-The csrf-token *is* the bearer secret — one 32-byte URL-safe random
-token serves both purposes. This keeps the wire protocol simple and
-removes a class of "token A vs token B mismatch" bugs.
-
-The module is transport-only; it never reads the audit database or
-calls tool logic. The control plane router (see ``control_api``) is
-responsible for that.
+Host is checked on ``/api``, ``/mcp``, and ``/ui``. Loopback is always
+allowed; extra tunnel hostnames come from ``allowed_hosts``. Origin is
+checked when the client sends one. A forged Origin, a matching
+cookie/header pair, or the MCP bearer alone cannot read or mutate the
+control plane.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import secrets
-from dataclasses import dataclass
-from typing import Iterable
+from collections.abc import Iterable
+from dataclasses import dataclass, field
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 from starlette.types import ASGIApp
 
 _log = logging.getLogger(__name__)
 
-
-# --- Pure helpers ---------------------------------------------------------
-
-
+SESSION_COOKIE = "lmcp_session"
+CSRF_HEADER = "x-lmcp-csrf"
 _UNSAFE_METHODS: frozenset[str] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+_LOOPBACK_HOSTS: frozenset[str] = frozenset({"localhost", "127.0.0.1", "::1"})
+_LOGIN_PATH = "/api/login"
 
 
 def is_unsafe_method(method: str) -> bool:
-    """Return True for HTTP methods that need CSRF protection."""
+    """Return True for HTTP methods that need a CSRF header."""
     return method.upper() in _UNSAFE_METHODS
 
 
-def origin_allowed(origin: str | None, allowlist: Iterable[str]) -> bool:
-    """Return True if ``origin`` matches any entry in the allowlist.
+def const_eq(left: str, right: str) -> bool:
+    """Compare two strings without leaking their lengths or contents."""
+    left_digest = hashlib.sha256(left.encode("utf-8")).digest()
+    right_digest = hashlib.sha256(right.encode("utf-8")).digest()
+    return secrets.compare_digest(left_digest, right_digest)
 
-    The comparison is exact-string; we do not parse the URL or strip
-    default ports because the allowlist is operator-supplied and short.
-    Adding a glob-style matcher is overkill for two entries.
-    """
+
+def hostname_of(value: str) -> str:
+    """Return the hostname from a Host header or ``host[:port]`` value."""
+    text = value.strip().lower().rstrip(".")
+    if text.startswith("["):
+        end = text.find("]")
+        return text[1:end] if end != -1 else text
+    if text.count(":") == 1:
+        return text.split(":", 1)[0]
+    return text
+
+
+def host_allowed(host_header: str | None, extra: Iterable[str]) -> bool:
+    """Allow loopback and operator-configured tunnel hostnames."""
+    if not host_header:
+        return False
+    hostname = hostname_of(host_header)
+    if hostname in _LOOPBACK_HOSTS:
+        return True
+    return hostname in {hostname_of(item) for item in extra if item}
+
+
+def origin_allowed(origin: str | None, allowlist: Iterable[str]) -> bool:
+    """Allow exact operator origins, plus loopback on any port."""
     if not origin:
         return False
-    return origin in set(allowlist)
+    if origin in set(allowlist):
+        return True
+    parsed = urlparse(origin)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return False
+    return parsed.hostname.lower() in _LOOPBACK_HOSTS
 
 
 def generate_token() -> str:
@@ -66,71 +92,108 @@ def generate_token() -> str:
     return secrets.token_urlsafe(32)
 
 
-# --- Bearer auth ----------------------------------------------------------
+def _unauthorized(message: str = "control-plane session required") -> JSONResponse:
+    return JSONResponse(
+        status_code=401,
+        content={"code": "unauthorized", "message": message},
+    )
 
 
-@dataclass(frozen=True)
+def _cookie_secure(request: Request) -> bool:
+    forwarded = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+    return request.url.scheme == "https" or forwarded == "https"
+
+
+def _set_session_cookie(response: Response, request: Request, session_id: str) -> None:
+    response.set_cookie(
+        key=SESSION_COOKIE,
+        value=session_id,
+        httponly=True,
+        samesite="strict",
+        secure=_cookie_secure(request),
+        path="/",
+    )
+
+
+@dataclass
+class SessionStore:
+    """Server-side sessions and single-use login nonces."""
+
+    _sessions: dict[str, str] = field(default_factory=dict)
+    _nonces: set[str] = field(default_factory=set)
+
+    def issue_login_nonce(self) -> str:
+        nonce = generate_token()
+        self._nonces.add(nonce)
+        return nonce
+
+    def open_session(
+        self,
+        presented: str,
+        *,
+        admin_secret: str,
+        mcp_bearer: str,
+        allow_admin_secret: bool = True,
+    ) -> tuple[str, str] | None:
+        """Open a session from the admin secret or a one-time nonce.
+
+        The MCP bearer is compared and then rejected, so possessing it
+        cannot mint a control-plane session even if a caller also sends
+        a lookalike cookie.
+        """
+        is_mcp = const_eq(presented, mcp_bearer)
+        is_admin = const_eq(presented, admin_secret) if allow_admin_secret else False
+        matched_nonce = False
+        for nonce in list(self._nonces):
+            if const_eq(presented, nonce):
+                matched_nonce = True
+        if is_mcp or not (is_admin or matched_nonce):
+            return None
+        if matched_nonce:
+            self._nonces = {nonce for nonce in self._nonces if not const_eq(presented, nonce)}
+        session_id = generate_token()
+        csrf = generate_token()
+        self._sessions[session_id] = csrf
+        return session_id, csrf
+
+    def csrf_for(self, session_id: str | None) -> str | None:
+        if not session_id:
+            return None
+        return self._sessions.get(session_id)
+
+
+@dataclass
 class BearerAuth:
-    """Bearer-token gate for ``/mcp``.
-
-    The expected token is supplied once (when the server boots) and
-    matched verbatim against the ``Authorization`` header.
-    """
+    """Bearer-token gate for ``/mcp`` only."""
 
     expected: str
 
     def is_valid(self, authorization: str | None) -> bool:
         if not authorization:
             return False
-        # Accept ``Bearer <token>`` (case-insensitive scheme).
         parts = authorization.split(" ", 1)
         if len(parts) != 2 or parts[0].lower() != "bearer":
             return False
-        # Constant-time compare prevents token-length side channels.
-        return secrets.compare_digest(parts[1], self.expected)
+        return const_eq(parts[1], self.expected)
 
 
-# --- Security context + middleware ---------------------------------------
-
-
-@dataclass(frozen=True)
+@dataclass
 class SecurityContext:
-    """The trusted state set up at server boot.
+    """Secrets and allowlists for one server process."""
 
-    Bundles the bearer secret + Origin allowlist into one object so the
-    control plane router can read it without reaching back into module
-    globals. Tests construct their own :class:`SecurityContext` so the
-    middleware logic stays decoupled from any concrete secret.
-    """
+    mcp_bearer: str
+    admin_secret: str
+    origin_allowlist: tuple[str, ...] = ("http://127.0.0.1", "http://localhost")
+    allowed_hosts: tuple[str, ...] = ()
+    sessions: SessionStore = field(default_factory=SessionStore)
 
-    token: str
-    origin_allowlist: tuple[str, ...]
-    csrf_cookie_name: str = "lmcp_csrf"
-    csrf_header_name: str = "x-lmcp-csrf"
+    def __post_init__(self) -> None:
+        if const_eq(self.mcp_bearer, self.admin_secret):
+            raise ValueError("mcp_bearer and admin_secret must be different secrets")
 
 
 class OriginCSRF(BaseHTTPMiddleware):
-    """ASGI middleware enforcing Origin + CSRF for ``/api/*`` and
-    Bearer auth for ``/mcp``.
-
-    Paths starting with ``/api/csrf-token`` are exempt from the CSRF
-    check — they exist specifically so the SPA can bootstrap itself.
-    Every other ``/api/*`` route runs through the full pipeline:
-
-    1. ``Origin`` header present + in allowlist
-       (allowlist defaults to ``http://127.0.0.1`` / ``http://localhost``)
-    2. For unsafe methods, the ``X-LMCP-CSRF`` header must match the
-       ``lmcp_csrf`` cookie verbatim. Constant-time compare.
-    3. ``GET / HEAD / OPTIONS`` skip step 2 (safe methods can't mutate).
-
-    Paths under ``/mcp`` (the Streamable HTTP MCP endpoint) require
-    ``Authorization: Bearer <token>`` matching the per-boot secret.
-    The token is the *same* value the API uses for CSRF — one
-    32-byte random string serves both surfaces, by design.
-
-    Failure responses are JSON with a stable shape the SPA / agent
-    can switch on.
-    """
+    """Host, origin, session, and CSRF checks for the HTTP surfaces."""
 
     def __init__(self, app: ASGIApp, *, context: SecurityContext) -> None:
         super().__init__(app)
@@ -138,79 +201,66 @@ class OriginCSRF(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):  # type: ignore[override]
         path = request.url.path
-        # /mcp requires the bearer secret. The FastMCP transport has
-        # no built-in auth, so we gate it here. /mcp is the agent
-        # path — no Origin / CSRF check (it doesn't speak a browser
-        # protocol).
+        if path.startswith("/api/") or path.startswith("/mcp") or path.startswith("/ui"):
+            if not host_allowed(request.headers.get("host"), self._context.allowed_hosts):
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "code": "host_denied",
+                        "message": "Host header is not loopback or an allowed tunnel hostname",
+                    },
+                )
         if path.startswith("/mcp"):
             return await self._check_mcp_bearer(request, call_next)
         if not path.startswith("/api/"):
             return await call_next(request)
 
-        # /api/csrf-token bootstraps the SPA — exempt from CSRF check.
-        # We still enforce Origin here; the SPA only fetches this once
-        # and the allowlist is per-machine.
         origin = request.headers.get("origin")
-        if not origin_allowed(origin, self._context.origin_allowlist):
+        if origin is not None and not origin_allowed(origin, self._context.origin_allowlist):
             return JSONResponse(
                 status_code=403,
                 content={
                     "code": "origin_denied",
-                    "message": "Origin header missing or not in allowlist",
-                    "next_actions": [
-                        "open the UI from http://127.0.0.1:<port> or http://localhost:<port>"
-                    ],
+                    "message": "Origin header is not in the allowlist",
                 },
             )
-
-        if path == "/api/csrf-token":
+        if path == _LOGIN_PATH:
             return await call_next(request)
 
+        csrf = self._context.sessions.csrf_for(request.cookies.get(SESSION_COOKIE))
+        if csrf is None:
+            return _unauthorized()
         if is_unsafe_method(request.method):
-            cookie = request.cookies.get(self._context.csrf_cookie_name)
-            header = request.headers.get(self._context.csrf_header_name)
-            if not cookie or not header:
+            header = request.headers.get(CSRF_HEADER)
+            if not header:
                 return JSONResponse(
                     status_code=403,
                     content={
                         "code": "csrf_missing",
-                        "message": "X-LMCP-CSRF header or lmcp_csrf cookie missing",
+                        "message": "X-LMCP-CSRF header required",
                     },
                 )
-            if not secrets.compare_digest(cookie, header):
+            if not const_eq(header, csrf):
                 return JSONResponse(
                     status_code=403,
                     content={
                         "code": "csrf_mismatch",
-                        "message": "X-LMCP-CSRF does not match cookie",
+                        "message": "X-LMCP-CSRF does not match the control-plane session",
                     },
                 )
         return await call_next(request)
 
-    async def _check_mcp_bearer(
-        self, request: Request, call_next
-    ):  # type: ignore[no-untyped-def]
-        """Verify the bearer token on every /mcp request. The token is
-        the same per-boot secret the SPA's CSRF cookie holds — one
-        32-byte URL-safe string covers both the agent path and the
-        browser control plane."""
-        auth = BearerAuth(expected=self._context.token)
+    async def _check_mcp_bearer(self, request: Request, call_next):  # type: ignore[no-untyped-def]
+        auth = BearerAuth(expected=self._context.mcp_bearer)
         if not auth.is_valid(request.headers.get("authorization")):
             return JSONResponse(
                 status_code=401,
                 content={
                     "code": "unauthorized",
-                    "message": "Authorization: Bearer <token> required",
-                    "next_actions": [
-                        "read the bearer secret from server.json "
-                        "and resend with Authorization: Bearer <token>"
-                    ],
+                    "message": "Authorization: Bearer <mcp token> required",
                 },
             )
         return await call_next(request)
-
-
-# --- App assembly --------------------------------------------------------
 
 
 def mount_app(
@@ -222,72 +272,72 @@ def mount_app(
     static_dir: str | None,
     static_root_path: str = "/ui",
 ) -> FastAPI:
-    """Mount control plane + MCP + UI static into one FastAPI app.
-
-    - ``control_router`` is a :class:`fastapi.APIRouter` (or any object
-      with ``.routes``). When ``None`` only static + MCP are mounted —
-      useful for tests.
-    - ``mcp_asgi_app`` is the result of
-      ``FastMCP.streamable_http_app()``. When ``None`` only static +
-      control plane are mounted.
-    - ``static_dir`` is the on-disk directory holding the Angular
-      ``index.html`` + bundle output. When ``None`` the static mount
-      is skipped.
-
-    The :class:`OriginCSRF` middleware is added to the app regardless;
-    it short-circuits paths outside ``/api/*`` so the static + MCP
-    mounts stay unaffected.
-    """
+    """Mount control plane + MCP + UI and attach the security middleware."""
+    app.state.security = context
     if control_router is not None:
-        # ``include_router`` accepts any router-like object via duck
-        # typing; FastAPI doesn't actually need a type annotation.
         app.include_router(control_router)  # type: ignore[arg-type]
     if mcp_asgi_app is not None:
         app.mount("/mcp", mcp_asgi_app)
     if static_dir:
         from fastapi.staticfiles import StaticFiles
 
-        # ``html=True`` makes ``/ui/foo`` fall back to ``/ui/foo.html``
-        # so the SPA's deep links work.
         app.mount(static_root_path, StaticFiles(directory=static_dir, html=True), name="ui")
     app.add_middleware(OriginCSRF, context=context)
 
-    @app.get("/api/csrf-token")
-    async def csrf_token_endpoint():
-        """Bootstrap endpoint. Sets the cookie and echoes the token."""
-        # The SPA calls this on first load. We set HttpOnly + SameSite=Lax
-        # so the cookie is sent back automatically. The JS never needs to
-        # read it; it just reads ``X-LMCP-CSRF`` from a sibling header.
-        from fastapi.responses import Response
-
-        response = Response(
-            content=json_for_csrf(context.token),
-            media_type="application/json",
+    @app.post("/api/login")
+    async def login_post(request: Request) -> Response:
+        try:
+            body = await request.json()
+        except (ValueError, json.JSONDecodeError):
+            body = {}
+        presented = str(body.get("token") or "") if isinstance(body, dict) else ""
+        opened = context.sessions.open_session(
+            presented,
+            admin_secret=context.admin_secret,
+            mcp_bearer=context.mcp_bearer,
+            allow_admin_secret=True,
         )
-        response.set_cookie(
-            key=context.csrf_cookie_name,
-            value=context.token,
-            httponly=True,
-            samesite="lax",
-            path="/",
-        )
+        if opened is None:
+            return _unauthorized("login rejected")
+        session_id, csrf = opened
+        response = JSONResponse({"ok": True, "csrf_token": csrf})
+        _set_session_cookie(response, request, session_id)
         return response
 
+    @app.get("/api/login")
+    async def login_get(request: Request, token: str = "") -> Response:
+        opened = context.sessions.open_session(
+            token,
+            admin_secret=context.admin_secret,
+            mcp_bearer=context.mcp_bearer,
+            allow_admin_secret=False,
+        )
+        if opened is None:
+            return _unauthorized("login rejected")
+        session_id, _csrf = opened
+        response = RedirectResponse(url="/ui/", status_code=302)
+        _set_session_cookie(response, request, session_id)
+        return response
+
+    @app.get("/api/csrf-token")
+    async def csrf_token_endpoint(request: Request) -> JSONResponse:
+        csrf = context.sessions.csrf_for(request.cookies.get(SESSION_COOKIE))
+        if csrf is None:
+            return _unauthorized()
+        return JSONResponse({"csrf_token": csrf})
+
     return app
-
-
-def json_for_csrf(token: str) -> str:
-    """Serialize the CSRF token as JSON for the SPA bootstrap response."""
-    import json
-
-    return json.dumps({"csrf_token": token})
 
 
 __all__ = [
     "BearerAuth",
     "OriginCSRF",
+    "SESSION_COOKIE",
     "SecurityContext",
+    "SessionStore",
+    "const_eq",
     "generate_token",
+    "host_allowed",
     "is_unsafe_method",
     "mount_app",
     "origin_allowed",

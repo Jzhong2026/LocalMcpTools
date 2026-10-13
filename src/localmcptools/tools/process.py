@@ -63,7 +63,9 @@ def process_start_dev_server(args: dict[str, Any]) -> ToolResponse:
     approval_id = args.get("approval_id")
     preview = {"preset": preset.name, "command_resolved": command, "cwd": workspace.canonical_root}
     if not isinstance(approval_id, str) or not approval_id:
-        approval = request(workspace.id, capability, args, profile=profile.value)
+        approval = request(
+            workspace.id, capability, args, profile=profile.value, preview=preview
+        )
         fail(code="approval_required", message="human approval is required before starting this process", tool=tool, audit_id="pending", run_id="pending", workspace_id=workspace.id, approval_id=approval.id, data=preview, next_actions=["review the resolved command, approve, and retry"])
     approval_id = cast(str, approval_id)
     try:
@@ -123,7 +125,10 @@ def process_stop_managed(args: dict[str, Any]) -> ToolResponse:
     approval_id = args.get("approval_id")
     capability = f"{profile.value}:{tool}"
     if not isinstance(approval_id, str) or not approval_id:
-        approval = request(item.workspace_id, capability, args, profile=profile.value)
+        approval = request(
+            item.workspace_id, capability, args, profile=profile.value,
+            preview={"id": item.id, "pid": item.pid, "command_resolved": item.command},
+        )
         fail(code="approval_required", message="human approval is required before stopping this process", tool=tool, audit_id="pending", run_id="pending", workspace_id=item.workspace_id, approval_id=approval.id, data={"id": item.id, "pid": item.pid, "command_resolved": item.command})
     approval_id = cast(str, approval_id)
     try:

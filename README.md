@@ -70,15 +70,65 @@ localmcptools start --http --port 7890 --auto-open-browser
 
 # In another shell: build the Angular SPA so the static mount has content.
 scripts\build_frontend.bat   # runs `npm install` if needed, then `ng build --prod`
-
-# Browse to http://127.0.0.1:7890/ui/
 ```
 
-Bearer secret for `/mcp` is generated at boot and stored in
-`%APPDATA%\LocalMcpTools\server.json` next to the bound port.
-CSRF double-submit protects every unsafe `/api/*` request; the SPA
-fetches `/api/csrf-token` on first load and includes the
-`X-LMCP-CSRF` header from then on.
+The process prints a **one-time** control-plane login URL on stderr and
+opens it when `--auto-open-browser` is set. That URL sets an HttpOnly
+session cookie and redirects to `/ui/`. If you miss it, paste
+`admin_secret` from `%APPDATA%\LocalMcpTools\server.json` into the UI
+sign-in form (`POST /api/login`). The file is written mode `0600`.
+
+`server.json` holds two independent secrets:
+
+| Field | Used for |
+|---|---|
+| `mcp_bearer` | `Authorization: Bearer` on `/mcp` only |
+| `admin_secret` | control-plane login only |
+
+The MCP bearer cannot approve commands, change profiles, rules, or
+settings, read the audit log, or shut the server down. CLI
+`localmcptools approve` and `localmcptools set-profile` talk to the
+local database and do not need the HTTP session.
+
+Rebuild the Angular bundle after pulling this change so `/ui/` includes
+the sign-in screen.
+
+### Running behind a tunnel
+
+Bind stays on loopback. A tunnel (for example `cloudflared tunnel --url http://127.0.0.1:7890`)
+forwards a public hostname to that port. Do **not** set `server.host` to
+`0.0.0.0`; the settings API rejects a non-loopback bind.
+
+1. Start on loopback and sign in with the one-time link or `admin_secret`.
+2. Put the tunnel hostname in config before exposing it. Either edit
+   `%APPDATA%\LocalMcpTools\config.json` and restart:
+
+```json
+{
+  "security": {
+    "allowed_hosts": ["your-name.trycloudflare.com"],
+    "origin_allowlist": [
+      "http://127.0.0.1",
+      "http://localhost",
+      "https://your-name.trycloudflare.com"
+    ]
+  }
+}
+```
+
+   or, while still on loopback, `POST /api/settings` with that patch
+   (it applies to the running process). Quick-tunnel hostnames change
+   every run; update `allowed_hosts` when the hostname changes.
+3. Start the tunnel only after those names are allowed. Requests whose
+   `Host` is anything else are rejected, which blocks DNS rebinding.
+4. Copy the HTTP `mcp.json` snippet from the signed-in MCP Config page.
+   It contains `mcp_bearer`. Do not put `admin_secret` in the agent config.
+
+Treat the tunnel as a public network. Anyone who can open the URL can
+attempt requests; only a control-plane session can change policy, and
+only `mcp_bearer` can call tools. Rotate both by restarting the server
+(it generates new secrets and deletes them on shutdown). See
+[`docs/README.md`](docs/README.md).
 
 ## Quick start
 

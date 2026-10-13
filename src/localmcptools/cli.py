@@ -25,8 +25,19 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from .config.paths import server_json_path
+from .persistence import db
 from .persistence.db import is_initialised
+from .policy.approval import (
+    ApprovalError,
+    ApprovalExpired,
+    approve,
+    expire_due,
+    list_approvals,
+    public_dict,
+)
+from .policy.profile import Profile, set_profile
 from .server import run_http, run_stdio
+from .workspaces.registry import WorkspaceNotRegistered
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -115,6 +126,36 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    approvals_p = sub.add_parser(
+        "approvals",
+        help="List action approvals so an operator can review them before granting.",
+    )
+    approvals_p.add_argument(
+        "--status",
+        choices=("pending", "approved", "consumed", "expired"),
+        default=None,
+        help="Filter by approval status (default: all).",
+    )
+
+    approve_p = sub.add_parser(
+        "approve",
+        help=(
+            "Approve one pending action. Human operator only; there is "
+            "no MCP tool that can call this."
+        ),
+    )
+    approve_p.add_argument("approval_id", help="approval id returned by the tool")
+
+    profile_p = sub.add_parser(
+        "set-profile",
+        help=(
+            "Set a workspace capability profile (observe, workspace_exec, "
+            "managed_process, interactive_ui). Human operator only."
+        ),
+    )
+    profile_p.add_argument("workspace_id")
+    profile_p.add_argument("profile", choices=[item.value for item in Profile])
+
     return p
 
 
@@ -146,6 +187,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cmd_install(getattr(args, "method", "scheduled_task"))
     if sub == "uninstall":
         return _cmd_uninstall()
+    if sub == "approvals":
+        return _cmd_approvals(getattr(args, "status", None))
+    if sub == "approve":
+        return _cmd_approve(args.approval_id)
+    if sub == "set-profile":
+        return _cmd_set_profile(args.workspace_id, args.profile)
 
     # argparse should have caught anything else.
     parser.print_help()
@@ -253,6 +300,51 @@ def _cmd_stop() -> int:
     # ``start`` calls don't trip the "another server appears to be
     # running" guard.
     server_json_path().unlink(missing_ok=True)
+    return EXIT_OK
+
+
+def _cmd_approvals(status: str | None) -> int:
+    """Print approvals as JSON. Reads the same database the server uses."""
+    db.init_db()
+    expire_due()
+    payload = {"approvals": [public_dict(item) for item in list_approvals(status=status)]}
+    print(json.dumps(payload))
+    return EXIT_OK
+
+
+def _cmd_approve(approval_id: str) -> int:
+    """Approve one pending action. Does not expose this through MCP."""
+    db.init_db()
+    try:
+        ok = approve(approval_id)
+    except ApprovalExpired as exc:
+        print(f"[localmcptools] {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    except ApprovalError as exc:
+        print(f"[localmcptools] {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    if not ok:
+        print(
+            f"[localmcptools] approval_id={approval_id!r} is not pending",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    print(json.dumps({"id": approval_id, "status": "approved"}))
+    return EXIT_OK
+
+
+def _cmd_set_profile(workspace_id: str, profile: str) -> int:
+    """Persist an operator profile grant for one workspace."""
+    db.init_db()
+    try:
+        applied = set_profile(workspace_id, profile)
+    except WorkspaceNotRegistered as exc:
+        print(f"[localmcptools] {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    except ValueError as exc:
+        print(f"[localmcptools] {exc}", file=sys.stderr)
+        return EXIT_USAGE
+    print(json.dumps({"workspace_id": workspace_id, "profile": applied.value}))
     return EXIT_OK
 
 

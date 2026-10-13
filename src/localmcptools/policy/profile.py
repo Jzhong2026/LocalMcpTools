@@ -1,9 +1,9 @@
 """Workspace capability profiles.
 
 Profiles are authority owned by the server, never by an MCP tool argument.
-This module deliberately exposes only a read operation during the first
-policy slice. Profile elevation will be performed by the approval workflow,
-not by a caller choosing a more powerful value.
+:func:`set_profile` is the operator entry point used by the control plane
+and the CLI. Tool code must call :func:`set_current_from_tool`, which
+always refuses.
 """
 
 from __future__ import annotations
@@ -65,10 +65,46 @@ def set_current_from_tool(*_args: object, **_kwargs: object) -> None:
     )
 
 
+def set_profile(
+    workspace_id: str,
+    profile: str,
+    *,
+    conn: sqlite3.Connection | None = None,
+) -> Profile:
+    """Set the workspace profile. Operator / control-plane / CLI only."""
+    if not workspace_id:
+        raise WorkspaceNotRegistered("workspace_id is empty")
+    try:
+        target = Profile(profile)
+    except ValueError as exc:
+        raise ValueError(f"unknown profile: {profile!r}") from exc
+
+    def _write(connection: sqlite3.Connection) -> Profile:
+        row = connection.execute(
+            "SELECT id FROM workspaces WHERE id = ?", (workspace_id,)
+        ).fetchone()
+        if row is None:
+            raise WorkspaceNotRegistered(
+                f"workspace_id={workspace_id!r} is not registered"
+            )
+        connection.execute(
+            "UPDATE workspaces SET profile = ? WHERE id = ?",
+            (target.value, workspace_id),
+        )
+        return target
+
+    if conn is not None:
+        return _write(conn)
+    db.init_db()
+    with db.connection() as connection:
+        return _write(connection)
+
+
 __all__ = [
     "DEFAULT_PROFILE",
     "Profile",
     "ProfileChangeForbidden",
     "current",
     "set_current_from_tool",
+    "set_profile",
 ]

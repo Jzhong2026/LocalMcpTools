@@ -24,8 +24,6 @@ from __future__ import annotations
 import contextlib
 import json
 from collections.abc import AsyncIterator
-from pathlib import Path
-from typing import Any
 
 import httpx
 import pytest
@@ -259,19 +257,21 @@ async def test_list_tools_over_http_matches_server_capability(
 # ---------------------------------------------------------------------------
 
 
-def test_same_token_works_for_both_mcp_and_api(
+def test_mcp_bearer_cannot_call_the_control_plane(
     live_server_http: HttpHarness,
 ) -> None:
-    """The CSRF cookie/header token *is* the bearer secret — one
-    32-byte random string serves both. A misconfiguration where the
-    two diverge would silently break the SPA without breaking the
-    MCP transport, so we test the actual equality here.
-    """
-    # The harness populates both fields from the same source.
-    assert live_server_http.bearer_token == live_server_http.csrf_token, (
-        "bearer_token and csrf_token should be the same value "
-        "(see transport/http.py docstring on the dual-purpose token)"
+    """The MCP bearer and the control-plane CSRF token are different secrets."""
+    assert live_server_http.bearer_token != live_server_http.csrf_token
+    response = httpx.get(
+        f"{live_server_http.base_url}/api/audit",
+        headers={
+            "Origin": live_server_http.origin,
+            "Authorization": f"Bearer {live_server_http.bearer_token}",
+        },
+        timeout=10,
     )
+    assert response.status_code == 401
+    assert live_server_http.bearer_token not in response.text
 
 
 # ---------------------------------------------------------------------------
@@ -281,7 +281,7 @@ def test_same_token_works_for_both_mcp_and_api(
 
 def test_http_tool_surface_coverage_summary() -> None:
     """Print the matrix once per run for CI dashboards."""
-    print(f"\n=== HTTP /mcp tool-surface coverage ===")
+    print("\n=== HTTP /mcp tool-surface coverage ===")
     print(f"  tools verified: {len(MIN_ARGS)}")
     print(f"  - happy-path tools (ok=true): "
           f"{sum(1 for c in EXPECTED_ERROR_CODES.values() if c == set())}")
@@ -289,4 +289,4 @@ def test_http_tool_surface_coverage_summary() -> None:
           f"{sum(1 for c in EXPECTED_ERROR_CODES.values() if c != set() and c != '*')}")
     print(f"  - any-error-OK tools: "
           f"{sum(1 for c in EXPECTED_ERROR_CODES.values() if c == '*')}")
-    print(f"  auth gates tested: missing / wrong / wrong-scheme / no-origin-required")
+    print("  auth gates tested: missing / wrong / wrong-scheme / no-origin-required")
