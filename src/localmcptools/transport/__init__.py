@@ -2,16 +2,14 @@
 
 Exports:
 
-- :class:`BearerAuth`     — validate ``Authorization: Bearer <token>`` on
-  ``/mcp`` (the MCP endpoint itself).
-- :class:`OriginCSRF`     — single ASGI middleware that enforces
-  ``Origin`` allowlist + ``X-LMCP-CSRF`` / ``lmcp_csrf`` cookie match
-  for ``/api/*`` routes.
+- :class:`BearerAuth`     — validate ``Authorization: Bearer <mcp token>``
+  on ``/mcp`` only. The MCP bearer does not authorize ``/api/*``.
+- :class:`OriginCSRF`     — Host allowlist, Origin allowlist, control-plane
+  session cookie, and per-session ``X-LMCP-CSRF`` for unsafe ``/api/*``.
 - :func:`mount_app`       — wire the control plane + MCP endpoint +
-  UI static assets into one FastAPI app, plus Origin/CSRF/Bearer.
+  UI static assets into one FastAPI app.
 
-The split between the two classes exists so the tests can exercise the
-pure decision logic without booting a server.
+The MCP bearer and the control-plane admin secret are different values.
 """
 
 from __future__ import annotations
@@ -21,6 +19,7 @@ from .http import (
     OriginCSRF,
     SecurityContext,
     generate_token,
+    host_allowed,
     is_unsafe_method,
     mount_app,
     origin_allowed,
@@ -31,6 +30,7 @@ __all__ = [
     "OriginCSRF",
     "SecurityContext",
     "generate_token",
+    "host_allowed",
     "is_unsafe_method",
     "mount_app",
     "origin_allowed",

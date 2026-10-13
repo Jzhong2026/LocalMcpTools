@@ -18,7 +18,6 @@ import json
 import os
 import sqlite3
 import subprocess
-import sys
 import time
 from pathlib import Path
 
@@ -141,7 +140,7 @@ def test_http_boots_and_writes_server_json(tmp_path: Path) -> None:
     proc = _spawn_http(tmp_path, port)
     server_json = tmp_path / "server.json"
     try:
-        # Wait up to 15 s for the server-side write (with csrf_token).
+        # Wait up to 15 s for the server-side write (mcp + admin secrets).
         # The cli writes a stub first; ``run_http`` overwrites it ~200 ms later.
         deadline = time.monotonic() + 15
         meta = None
@@ -151,14 +150,14 @@ def test_http_boots_and_writes_server_json(tmp_path: Path) -> None:
                     candidate = json.loads(server_json.read_text(encoding="utf-8"))
                 except (OSError, json.JSONDecodeError):
                     candidate = None
-                if candidate and candidate.get("csrf_token"):
+                if candidate and candidate.get("mcp_bearer") and candidate.get("admin_secret"):
                     meta = candidate
                     break
             if proc.poll() is not None:
                 out = proc.stdout.read().decode("utf-8", "replace") if proc.stdout else ""
                 pytest.fail(f"server exited early: code={proc.returncode}\n{out}")
             time.sleep(0.1)
-        assert meta is not None, "server.json never grew a csrf_token within 15 s"
+        assert meta is not None, "server.json never grew mcp_bearer and admin_secret within 15 s"
 
         assert meta["host"] == "127.0.0.1"
         assert meta["port"] == port
@@ -166,7 +165,10 @@ def test_http_boots_and_writes_server_json(tmp_path: Path) -> None:
         # alive on the system. (Windows ``Popen.pid`` can disagree with
         # the child's ``os.getpid()`` due to handle inheritance in 3.14.)
         assert isinstance(meta["pid"], int) and meta["pid"] > 0
-        assert meta["csrf_token"], "csrf_token missing"
+        assert meta["mcp_bearer"]
+        assert meta["admin_secret"]
+        assert meta["mcp_bearer"] != meta["admin_secret"]
+        assert meta.get("login_url")
         assert "started_at" in meta
         assert meta["transport"] == "http"
     finally:
@@ -179,10 +181,13 @@ def test_http_boots_and_writes_server_json(tmp_path: Path) -> None:
 
 
 def test_http_status_endpoint_responds_200(live_server_http) -> None:
-    """After boot, GET /api/status returns 200 with Origin."""
+    """After boot, a signed-in GET /api/status returns 200."""
     r = httpx.get(
         f"{live_server_http.base_url}/api/status",
-        headers={"Origin": live_server_http.origin},
+        headers={
+            "Origin": live_server_http.origin,
+            "Cookie": live_server_http.csrf_cookie,
+        },
         timeout=5,
     )
     assert r.status_code == 200, f"status={r.status_code} body={r.text}"
@@ -197,12 +202,12 @@ def test_http_status_endpoint_responds_200(live_server_http) -> None:
 
 
 def test_http_rejects_missing_origin(live_server_http) -> None:
-    """/api/* without Origin → 403."""
+    """/api/* without a control-plane session → 401."""
     r = httpx.get(
         f"{live_server_http.base_url}/api/status",
         timeout=5,
     )
-    assert r.status_code == 403, f"expected 403 got {r.status_code}"
+    assert r.status_code == 401, f"expected 401 got {r.status_code}"
 
 
 def test_http_rejects_wrong_origin(live_server_http) -> None:
@@ -256,7 +261,7 @@ def test_shutdown_frees_port_and_removes_server_json(tmp_path: Path) -> None:
             try:
                 s.connect(("127.0.0.1", port))
                 pytest.fail(f"port {port} still bound after stop")
-            except (ConnectionRefusedError, socket.timeout, OSError):
+            except (TimeoutError, ConnectionRefusedError, OSError):
                 pass  # expected
 
         # server.json should be gone

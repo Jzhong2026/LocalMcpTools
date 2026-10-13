@@ -174,7 +174,7 @@ def shared_harness(tmp_path: Path) -> SharedHarness:
     server_json = tmp_path / "server.json"
     base_url = f"http://127.0.0.1:{port}"
 
-    # Wait for server.json WITH csrf_token (max 15 s).
+    # Wait for server.json WITH the MCP bearer (max 15 s).
     deadline = time.monotonic() + 15
     meta = None
     while time.monotonic() < deadline:
@@ -183,7 +183,7 @@ def shared_harness(tmp_path: Path) -> SharedHarness:
                 meta = json.loads(server_json.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 meta = None
-            if meta and meta.get("csrf_token"):
+            if meta and meta.get("mcp_bearer"):
                 break
         if proc.poll() is not None:
             stdout = proc.stdout.read().decode("utf-8", "replace") if proc.stdout else ""
@@ -191,9 +191,9 @@ def shared_harness(tmp_path: Path) -> SharedHarness:
         time.sleep(0.1)
     else:
         proc.terminate()
-        raise RuntimeError("server.json never grew a csrf_token within 15 s")
+        raise RuntimeError("server.json never grew an mcp_bearer within 15 s")
 
-    # Wait until /api/status responds
+    # Wait until /api/status responds. Anonymous callers get 401.
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         try:
@@ -202,16 +202,16 @@ def shared_harness(tmp_path: Path) -> SharedHarness:
                 headers={"Origin": "http://127.0.0.1"},
                 timeout=2,
             )
-            if r.status_code == 200:
+            if r.status_code in {200, 401}:
                 break
         except httpx.HTTPError:
             pass
         time.sleep(0.1)
     else:
         proc.terminate()
-        raise RuntimeError("/api/status never returned 200")
+        raise RuntimeError("/api/status never became reachable")
 
-    token = meta["csrf_token"]
+    token = meta["mcp_bearer"]
     harness = SharedHarness(
         data_dir=tmp_path,
         base_url=base_url,

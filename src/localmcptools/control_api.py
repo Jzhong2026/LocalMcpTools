@@ -46,10 +46,10 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel, Field
 
-from .config.paths import config_path, data_dir, server_json_path
+from .config.paths import data_dir, server_json_path
 from .config.settings import load_settings
 from .config.settings import save_settings as _save_settings
-from .persistence import audit, db
+from .persistence import db
 from .policy.approval import (
     ApprovalError,
     ApprovalExpired,
@@ -222,7 +222,7 @@ async def audit_log(call_id: str) -> Response:
         raise HTTPException(
             status_code=410,
             detail={"code": "artifact_missing", "message": str(exc)},
-        )
+        ) from exc
     return PlainTextResponse(body, media_type="text/plain")
 
 
@@ -234,13 +234,49 @@ async def settings_get() -> dict[str, Any]:
     return load_settings()
 
 
+_LOOPBACK_BIND = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _requested_bind_host(patch: dict[str, Any]) -> str | None:
+    server = patch.get("server")
+    if isinstance(server, dict) and "host" in server:
+        return str(server.get("host") or "")
+    return None
+
+
+def _sync_live_policy(request: Request, merged: dict[str, Any]) -> None:
+    """Push origin and tunnel-host changes into the running middleware."""
+    policy = getattr(request.app.state, "security", None)
+    if policy is None:
+        return
+    security = merged.get("security")
+    if not isinstance(security, dict):
+        return
+    origins = security.get("origin_allowlist")
+    if isinstance(origins, list):
+        policy.origin_allowlist = tuple(str(item) for item in origins)
+    hosts = security.get("allowed_hosts")
+    if isinstance(hosts, list):
+        policy.allowed_hosts = tuple(str(item) for item in hosts)
+
+
 @router.post("/settings")
-async def settings_apply(body: SettingsPatch) -> dict[str, Any]:
+async def settings_apply(body: SettingsPatch, request: Request) -> dict[str, Any]:
     """Apply a settings patch.
 
     Returns ``{applied: [...], requires_restart: [...], failed: [...]}``
     so the SPA can show a single banner when restart is required.
+    ``server.host`` cannot leave loopback through this endpoint.
     """
+    requested_host = _requested_bind_host(body.patch)
+    if requested_host is not None and requested_host not in _LOOPBACK_BIND:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "host_not_loopback",
+                "message": "server.host must stay on loopback; expose HTTP with a tunnel hostname instead",
+            },
+        )
     # Keys that require a restart to take effect. Anything else
     # re-loads on next call.
     RESTART_KEYS: frozenset[str] = frozenset({
@@ -248,7 +284,6 @@ async def settings_apply(body: SettingsPatch) -> dict[str, Any]:
         ("server", "port"),
         ("security", "transport_mode"),
         ("security", "http_shared_mode_enabled"),
-        ("security", "origin_allowlist"),
     })
     applied: list[str] = []
     requires_restart: list[str] = []
@@ -269,7 +304,8 @@ async def settings_apply(body: SettingsPatch) -> dict[str, Any]:
         raise HTTPException(
             status_code=400,
             detail={"code": "settings_save_failed", "message": str(exc)},
-        )
+        ) from exc
+    _sync_live_policy(request, merged)
 
     return {
         "applied": applied,
@@ -479,7 +515,7 @@ async def backgrounds_stop(process_id: str) -> dict[str, Any]:
         raise HTTPException(
             status_code=404,
             detail={"code": "managed_process_not_found", "id": process_id, "message": str(exc)},
-        )
+        ) from exc
     stopped = manager.stop(item.id, graceful=True)
     return stopped.as_dict()
 
@@ -550,14 +586,14 @@ def _proxy_tool(tool: str, args: dict[str, Any]) -> Any:
     service = ToolExecutionService()
     try:
         registration = service.get_registration(tool)
-    except KeyError:
+    except KeyError as exc:
         # The control_app test fixture builds an empty service; the
         # real bootstrap registers every tool body. A missing tool is
         # a 501 here so the SPA renders an actionable error.
         raise HTTPException(
             status_code=501,
             detail={"code": "not_implemented", "message": f"unknown tool {tool!r}"},
-        )
+        ) from exc
     if registration is None:
         raise HTTPException(
             status_code=501,
@@ -569,7 +605,7 @@ def _proxy_tool(tool: str, args: dict[str, Any]) -> Any:
         raise HTTPException(
             status_code=500,
             detail={"code": "internal_error", "message": str(exc)},
-        )
+        ) from exc
     if isinstance(result, dict) and result.get("ok") is False and result.get("error"):
         # Tool-level errors become 4xx so the SPA can render the error
         # envelope verbatim. The audit row already records the failure.
@@ -637,20 +673,25 @@ async def mcp_config_snippet(request: Request) -> dict[str, Any]:
             port = int(data.get("port") or port)
     except (OSError, ValueError):
         pass
-    host = settings.get("server", {}).get("host") or "127.0.0.1"
+    configured_host = settings.get("server", {}).get("host") or "127.0.0.1"
+    host = configured_host if configured_host in {"127.0.0.1", "localhost", "::1"} else "127.0.0.1"
     base_url = f"http://{host}:{port}"
 
-    # Pull the bearer token out of server.json so the snippet can ship
-    # a working Authorization header.
+    # Only an authenticated caller reaches this handler. The token is the
+    # MCP bearer, never the control-plane admin secret.
     token = ""
-    try:
-        import json
-        server_json = server_json_path()
-        if server_json.exists():
-            data = json.loads(server_json.read_text(encoding="utf-8"))
-            token = str(data.get("csrf_token") or "")
-    except (OSError, ValueError):
-        pass
+    security = getattr(request.app.state, "security", None)
+    if security is not None:
+        token = str(getattr(security, "mcp_bearer", "") or "")
+    if not token:
+        try:
+            import json
+            server_json = server_json_path()
+            if server_json.exists():
+                data = json.loads(server_json.read_text(encoding="utf-8"))
+                token = str(data.get("mcp_bearer") or "")
+        except (OSError, ValueError):
+            pass
 
     snippet = {
         "codebuddy": {

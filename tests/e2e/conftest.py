@@ -26,7 +26,6 @@ the suite is safe to interrupt.
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import json
 import os
@@ -35,7 +34,7 @@ import sqlite3
 import subprocess
 import sys
 import time
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -107,6 +106,7 @@ class HttpHarness:
     bearer_token: str
     csrf_token: str
     csrf_cookie: str
+    admin_secret: str
     origin: str
     data_dir: Path
     pid: int  # server's actual pid (from server.json, NOT subprocess.Popen.pid)
@@ -174,9 +174,8 @@ def live_server_http(tmp_path: Path) -> Iterator[HttpHarness]:
     server_json = tmp_path / "server.json"
     base_url = f"http://127.0.0.1:{port}"
     try:
-        # Wait for server.json WITH csrf_token (max 15 s).
-        # ``cli.py`` writes a stub first; the real server-side write
-        # comes from ``run_http`` ~200 ms later.
+        # Wait for server.json WITH separate MCP and admin secrets.
+        # ``cli.py`` writes a stub first; ``run_http`` overwrites it.
         deadline = time.monotonic() + 15
         meta = None
         while time.monotonic() < deadline:
@@ -185,7 +184,7 @@ def live_server_http(tmp_path: Path) -> Iterator[HttpHarness]:
                     candidate = json.loads(server_json.read_text(encoding="utf-8"))
                 except (OSError, json.JSONDecodeError):
                     candidate = None
-                if candidate and candidate.get("csrf_token"):
+                if candidate and candidate.get("mcp_bearer") and candidate.get("admin_secret"):
                     meta = candidate
                     break
             if proc.poll() is not None:
@@ -194,37 +193,41 @@ def live_server_http(tmp_path: Path) -> Iterator[HttpHarness]:
             time.sleep(0.1)
         else:
             proc.terminate()
-            raise RuntimeError("server.json never grew a csrf_token within 15 s")
+            raise RuntimeError("server.json never grew mcp_bearer and admin_secret within 15 s")
 
-        # The same token serves as both /mcp Bearer and /api/* CSRF.
-        token = meta["csrf_token"]
-
-        # Wait until /api/status actually responds. /api/* uses Origin
-        # gate + (for unsafe methods) CSRF cookie+header. No Bearer
-        # required for GET.
         import httpx
 
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
             try:
-                r = httpx.get(
-                    f"{base_url}/api/status",
-                    headers={"Origin": "http://127.0.0.1"},
-                    timeout=2,
-                )
-                if r.status_code == 200:
+                r = httpx.get(f"{base_url}/api/status", timeout=2)
+                if r.status_code in {200, 401, 403}:
                     break
             except httpx.HTTPError:
                 pass
             time.sleep(0.1)
         else:
-            raise RuntimeError("/api/status never returned 200")
+            raise RuntimeError("/api/status never became reachable")
+
+        login = httpx.post(
+            f"{base_url}/api/login",
+            json={"token": meta["admin_secret"]},
+            headers={"Origin": "http://127.0.0.1"},
+            timeout=5,
+        )
+        if login.status_code != 200:
+            raise RuntimeError(f"control-plane login failed: {login.status_code} {login.text}")
+        session_id = login.cookies.get("lmcp_session")
+        csrf = login.json().get("csrf_token")
+        if not session_id or not csrf:
+            raise RuntimeError("login did not return a session cookie and csrf token")
 
         yield HttpHarness(
             base_url=base_url,
-            bearer_token=token,
-            csrf_token=token,
-            csrf_cookie=f"lmcp_csrf={token}",
+            bearer_token=meta["mcp_bearer"],
+            csrf_token=csrf,
+            csrf_cookie=f"lmcp_session={session_id}",
+            admin_secret=meta["admin_secret"],
             origin="http://127.0.0.1",
             data_dir=tmp_path,
             pid=meta["pid"],  # server.json's view, not subprocess.Popen.pid

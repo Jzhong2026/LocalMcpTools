@@ -528,18 +528,21 @@ def run_http(
     static UI mount. Blocks until the operator hits ``POST /api/shutdown``
     or sends Ctrl+C.
 
-    The bearer / CSRF token is generated once and persisted in
-    ``server.json`` alongside the bound port so other processes (the UI,
-    agents over HTTP) can pick it up.
+    The MCP bearer and the control-plane admin secret are generated
+    separately and written to ``server.json`` (mode 0600). A one-time
+    login URL is printed on stderr. The MCP bearer never authorizes
+    ``/api/*``.
     """
     import json
     import os
+    import sys
     import webbrowser
     from contextlib import asynccontextmanager
 
     from fastapi import FastAPI
 
-    from .config.paths import server_json_path
+    from .config.paths import server_json_path, write_private_json
+    from .config.settings import load_settings
     from .execution.background import shutdown_runtime, start_runtime
     from .transport import SecurityContext, mount_app
 
@@ -574,14 +577,25 @@ def run_http(
     fastmcp = build_server(streamable_http_path="/")
     start_runtime()
 
-    # Allocate the bearer / CSRF token once; both share it.
     from .transport.http import generate_token
 
-    token = generate_token()
+    settings = load_settings()
+    security_settings = settings.get("security") or {}
+    configured_origins = security_settings.get("origin_allowlist") or [
+        "http://127.0.0.1",
+        "http://localhost",
+    ]
+    configured_hosts = security_settings.get("allowed_hosts") or []
+    mcp_bearer = generate_token()
+    admin_secret = generate_token()
     context = SecurityContext(
-        token=token,
-        origin_allowlist=("http://127.0.0.1", "http://localhost"),
+        mcp_bearer=mcp_bearer,
+        admin_secret=admin_secret,
+        origin_allowlist=tuple(str(item) for item in configured_origins),
+        allowed_hosts=tuple(str(item) for item in configured_hosts),
     )
+    login_nonce = context.sessions.issue_login_nonce()
+    login_url = f"http://{host}:{port}/api/login?token={login_nonce}"
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -605,26 +619,36 @@ def run_http(
         static_dir=static_dir,
     )
 
-    # Persist server.json BEFORE binding so the UI / external agents can
-    # read the URL even during the boot window.
-    state.parent.mkdir(parents=True, exist_ok=True)
-    state.write_text(
-        json.dumps(
-            {
-                "pid": os.getpid(),
-                "host": host,
-                "port": port,
-                "started_at": int(time.time() * 1000),
-                "csrf_token": token,
-                "transport": "http",
-            }
-        ),
-        encoding="utf-8",
+    # Persist server.json BEFORE binding so the operator can read the
+    # admin secret and the MCP bearer during the boot window. This file
+    # is the out-of-band channel; HTTP responses never return these secrets
+    # to an unauthenticated client.
+    write_private_json(
+        state,
+        {
+            "pid": os.getpid(),
+            "host": host,
+            "port": port,
+            "started_at": int(time.time() * 1000),
+            "mcp_bearer": mcp_bearer,
+            "admin_secret": admin_secret,
+            "login_url": login_url,
+            "transport": "http",
+        },
+    )
+    print(
+        "[localmcptools] control-plane login (one-time): " + login_url,
+        file=sys.stderr,
+    )
+    print(
+        "[localmcptools] admin_secret and mcp_bearer are in server.json. "
+        "The MCP bearer cannot call /api.",
+        file=sys.stderr,
     )
 
     if auto_open_browser:
         try:
-            webbrowser.open(f"http://{host}:{port}/ui/")
+            webbrowser.open(login_url)
         except OSError as exc:  # noqa: BLE001
             _log.warning("could not open browser: %s", exc)
 

@@ -34,8 +34,10 @@ def control_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     db.init_db(tmp_path / "audit.sqlite")
     app = FastAPI()
     ctx = SecurityContext(
-        token="test-token",
+        mcp_bearer="mcp-bearer-test-value",
+        admin_secret="admin-secret-test-value",
         origin_allowlist=("http://127.0.0.1", "http://localhost"),
+        allowed_hosts=("testserver",),
     )
     mount_app(app=app, context=ctx, control_router=router, mcp_asgi_app=None, static_dir=None)
     return app
@@ -50,10 +52,11 @@ def _client(app: FastAPI) -> httpx.AsyncClient:
 
 
 async def _csrf(client: httpx.AsyncClient) -> dict[str, str]:
-    await client.get("/api/csrf-token")
-    cookie = client.cookies.get("lmcp_csrf")
-    assert cookie
-    return {"X-LMCP-CSRF": cookie}
+    response = await client.post("/api/login", json={"token": "admin-secret-test-value"})
+    assert response.status_code == 200, response.text
+    csrf = response.json()["csrf_token"]
+    assert csrf != "mcp-bearer-test-value"
+    return {"X-LMCP-CSRF": csrf}
 
 
 def _shell(database: Path):

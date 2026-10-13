@@ -24,8 +24,6 @@ Negative paths the e2e plan calls out:
 
 from __future__ import annotations
 
-import json
-from collections.abc import Iterator
 from typing import Any
 
 import httpx
@@ -42,12 +40,12 @@ pytestmark = pytest.mark.e2e
 
 
 def _safe_headers(harness: HttpHarness) -> dict[str, str]:
-    """Headers for safe methods (GET / HEAD / OPTIONS): Origin only."""
-    return {"Origin": harness.origin}
+    """Headers for safe methods: Origin plus the control-plane session."""
+    return {"Origin": harness.origin, "Cookie": harness.csrf_cookie}
 
 
 def _unsafe_headers(harness: HttpHarness) -> dict[str, str]:
-    """Headers for unsafe methods (POST / PATCH / DELETE): Origin + CSRF."""
+    """Headers for unsafe methods: session cookie plus the per-session CSRF token."""
     return {
         "Origin": harness.origin,
         "X-LMCP-CSRF": harness.csrf_token,
@@ -248,15 +246,16 @@ def test_mcp_config_snippet(live_server_http: HttpHarness) -> None:
 
 
 def test_csrf_token_bootstrap(live_server_http: HttpHarness) -> None:
-    """``GET /api/csrf-token`` is exempt from CSRF but still requires Origin."""
+    """A signed-in session can read its CSRF token, which is not the MCP bearer."""
     r = httpx.get(
         f"{live_server_http.base_url}/api/csrf-token",
-        headers={"Origin": live_server_http.origin},
+        headers=_safe_headers(live_server_http),
         timeout=10,
     )
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["csrf_token"] == live_server_http.csrf_token
+    assert body["csrf_token"] != live_server_http.bearer_token
 
 
 # ---------------------------------------------------------------------------
@@ -265,9 +264,9 @@ def test_csrf_token_bootstrap(live_server_http: HttpHarness) -> None:
 
 
 def test_missing_origin_rejected(live_server_http: HttpHarness) -> None:
-    """No Origin header → 403 from any /api/* endpoint."""
+    """No session → 401. Origin alone is not authentication."""
     r = httpx.get(f"{live_server_http.base_url}/api/status", timeout=10)
-    assert r.status_code == 403, f"expected 403 got {r.status_code}: {r.text}"
+    assert r.status_code == 401, f"expected 401 got {r.status_code}: {r.text}"
 
 
 def test_wrong_origin_rejected(live_server_http: HttpHarness) -> None:
@@ -281,10 +280,10 @@ def test_wrong_origin_rejected(live_server_http: HttpHarness) -> None:
 
 
 def test_post_without_csrf_rejected(live_server_http: HttpHarness) -> None:
-    """POST without CSRF cookie + header → 403."""
+    """A session without the CSRF header cannot mutate."""
     r = httpx.post(
         f"{live_server_http.base_url}/api/rules/reload",
-        headers={"Origin": live_server_http.origin},
+        headers={"Origin": live_server_http.origin, "Cookie": live_server_http.csrf_cookie},
         json={},
         timeout=10,
     )
@@ -292,25 +291,25 @@ def test_post_without_csrf_rejected(live_server_http: HttpHarness) -> None:
 
 
 def test_patch_without_csrf_rejected(live_server_http: HttpHarness) -> None:
-    """PATCH without CSRF cookie + header → 403."""
+    """PATCH without the per-session CSRF header → 403."""
     r = httpx.patch(
         f"{live_server_http.base_url}/api/rules/format-volume",
-        headers={"Origin": live_server_http.origin},
+        headers={"Origin": live_server_http.origin, "Cookie": live_server_http.csrf_cookie},
         json={"enabled": True},
         timeout=10,
     )
     assert r.status_code == 403, f"expected 403 got {r.status_code}: {r.text}"
 
 
-def test_csrf_token_exempt_from_csrf_check(live_server_http: HttpHarness) -> None:
-    """``GET /api/csrf-token`` should work even without a CSRF token
-    (it exists specifically to bootstrap one). Origin still required."""
+def test_csrf_token_requires_session(live_server_http: HttpHarness) -> None:
+    """``GET /api/csrf-token`` does not hand the MCP bearer to anonymous clients."""
     r = httpx.get(
         f"{live_server_http.base_url}/api/csrf-token",
         headers={"Origin": live_server_http.origin},
         timeout=10,
     )
-    assert r.status_code == 200, r.text
+    assert r.status_code == 401, r.text
+    assert live_server_http.bearer_token not in r.text
 
 
 # ---------------------------------------------------------------------------
@@ -343,7 +342,7 @@ def test_endpoint_coverage_summary() -> None:
         "GET /api/mcp-config-snippet",
         "GET /api/csrf-token (transport bootstrap)",
     ]
-    print(f"\n=== HTTP control-plane coverage ===")
+    print("\n=== HTTP control-plane coverage ===")
     print(f"  endpoints covered: {len(expected)}")
     for ep in expected:
         print(f"  - {ep}")
