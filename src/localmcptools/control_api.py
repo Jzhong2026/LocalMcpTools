@@ -17,6 +17,10 @@ Endpoints (paths relative to ``/api``):
 - ``GET  /rules``                    every built-in + custom rule + hit stats
 - ``PATCH /rules/{id}``              toggle a rule enabled/disabled
 - ``POST /rules/reload``             reload rule JSON from disk
+- ``GET  /workspaces``               registered workspaces and profiles
+- ``POST /workspaces/{id}/profile``  operator sets a workspace profile
+- ``GET  /approvals``                pending (or filtered) action approvals
+- ``POST /approvals/{id}/approve``   operator approves one pending action
 - ``GET  /backgrounds``              list managed processes
 - ``POST /backgrounds/{id}/stop``    stop a managed process (graceful)
 - ``GET  /mcp-config-snippet``       per-agent ``mcp.json`` snippet
@@ -46,8 +50,18 @@ from .config.paths import config_path, data_dir, server_json_path
 from .config.settings import load_settings
 from .config.settings import save_settings as _save_settings
 from .persistence import audit, db
+from .policy.approval import (
+    ApprovalError,
+    ApprovalExpired,
+    approve,
+    expire_due,
+    list_approvals,
+    public_dict,
+)
+from .policy.profile import set_profile
 from .process import manager
 from .safety.rules import RuleEngine
+from .workspaces.registry import WorkspaceNotRegistered, list_workspaces
 
 _log = logging.getLogger(__name__)
 
@@ -69,6 +83,12 @@ class SettingsPatch(BaseModel):
 
 class RuleToggle(BaseModel):
     enabled: bool
+
+
+class ProfileUpdate(BaseModel):
+    """Operator-selected workspace profile. Not an MCP tool argument."""
+
+    profile: str
 
 
 # --- /status --------------------------------------------------------------
@@ -301,6 +321,8 @@ async def rules_list() -> dict[str, Any]:
     from .persistence import db as db_module
 
     engine = _engine()
+    engine.reload()
+    disabled = engine.disabled_ids
     rules = []
     for rule in engine._rules:  # type: ignore[attr-defined]
         rules.append(
@@ -309,6 +331,7 @@ async def rules_list() -> dict[str, Any]:
                 "severity": rule.severity,
                 "suggestion": rule.suggestion,
                 "clauses": list(rule.clauses),
+                "enabled": rule.id not in disabled,
             }
         )
 
@@ -337,10 +360,9 @@ async def rules_list() -> dict[str, Any]:
 async def rules_toggle(rule_id: str, body: RuleToggle) -> dict[str, Any]:
     """Toggle a rule enabled/disabled.
 
-    The disable flag is held in a small in-memory overlay on the
-    :class:`RuleEngine` so a reload from disk restores the canonical
-    state. Persistent disable would require a custom-rules file;
-    that's a future enhancement.
+    The flag is persisted in ``rule_overrides`` and reloaded by every
+    fresh :class:`RuleEngine`, including the one ``shell.run_command``
+    builds per call. A disk reload keeps operator disables.
     """
     engine = _engine()
     if not any(r.id == rule_id for r in engine._rules):  # type: ignore[attr-defined]
@@ -362,6 +384,82 @@ async def rules_reload() -> dict[str, Any]:
     engine = _engine()
     report = engine.reload()
     return report
+
+
+# --- /workspaces and /approvals (operator only; not MCP tools) ----------
+
+
+@router.get("/workspaces")
+async def workspaces_list() -> dict[str, Any]:
+    """Registered workspaces, including the operator-granted profile."""
+    return {
+        "workspaces": [
+            {
+                "workspace_id": item.id,
+                "canonical_root": item.canonical_root,
+                "profile": item.profile,
+                "registered_at": item.registered_at,
+                "notes": item.notes,
+            }
+            for item in list_workspaces()
+        ]
+    }
+
+
+@router.post("/workspaces/{workspace_id}/profile")
+async def workspaces_set_profile(workspace_id: str, body: ProfileUpdate) -> dict[str, Any]:
+    """Raise or lower a workspace profile. Human operator only."""
+    try:
+        applied = set_profile(workspace_id, body.profile)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "invalid_profile", "message": str(exc)},
+        ) from exc
+    except WorkspaceNotRegistered as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "workspace_not_registered", "message": str(exc)},
+        ) from exc
+    return {"workspace_id": workspace_id, "profile": applied.value}
+
+
+@router.get("/approvals")
+async def approvals_list(
+    status: str | None = Query(default=None),
+    workspace_id: str | None = Query(default=None),
+) -> dict[str, Any]:
+    """List approvals so an operator can see the command before granting it."""
+    expire_due()
+    return {
+        "approvals": [
+            public_dict(item)
+            for item in list_approvals(status=status, workspace_id=workspace_id)
+        ]
+    }
+
+
+@router.post("/approvals/{approval_id}/approve")
+async def approvals_approve(approval_id: str) -> dict[str, Any]:
+    """Mark one pending approval approved. Human operator only."""
+    try:
+        ok = approve(approval_id)
+    except ApprovalExpired as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "approval_expired", "message": str(exc)},
+        ) from exc
+    except ApprovalError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "approval_not_found", "message": str(exc)},
+        ) from exc
+    if not ok:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "approval_not_pending", "id": approval_id},
+        )
+    return {"id": approval_id, "status": "approved"}
 
 
 # --- /backgrounds ---------------------------------------------------------

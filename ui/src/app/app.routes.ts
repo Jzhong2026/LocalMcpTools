@@ -28,6 +28,13 @@ export const APP_ROUTES: Routes = [
       ),
   },
   {
+    path: 'approvals',
+    loadComponent: () =>
+      import('./features/approvals/approvals.component').then(
+        (m) => m.ApprovalsComponent,
+      ),
+  },
+  {
     path: 'rules',
     loadComponent: () =>
       import('./features/rules/rules-list.component').then(

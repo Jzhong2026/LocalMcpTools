@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 import time
@@ -10,6 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ..config import paths as config_paths
+from ..config.paths import ENV_OVERRIDE, _resolve_data_dir
 from ..persistence import db
 from .redact import redact
 
@@ -41,12 +44,13 @@ class RuleEngine:
     def reload(self) -> dict[str, Any]:
         loaded, errors = load_all(self._builtin_dir, self._custom_dir)
         self._rules = tuple(loaded)
-        # Drop any disabled ids that no longer exist after reload.
-        existing_ids = {rule.id for rule in self._rules}
-        self._disabled = frozenset(self._disabled & existing_ids)
+        self._apply_persisted_disabled()
         return {"reloaded": len(loaded), "errors": errors}
 
     def match(self, cmd: str, args: list[str] | None = None) -> RuleMatch | None:
+        # Every call re-reads persisted toggles so a control-plane or CLI
+        # disable applies even when this engine was built for one command.
+        self._apply_persisted_disabled()
         command = " ".join([cmd, *(args or [])])
         for rule in self._rules:
             if rule.id in self._disabled:
@@ -63,7 +67,12 @@ class RuleEngine:
             self._disabled = self._disabled - {rule_id}
         else:
             self._disabled = self._disabled | {rule_id}
+        _write_enabled(rule_id, enabled)
         return True
+
+    def _apply_persisted_disabled(self) -> None:
+        existing_ids = {rule.id for rule in self._rules}
+        self._disabled = frozenset(_read_disabled() & existing_ids)
 
     @property
     def disabled_ids(self) -> frozenset[str]:
@@ -87,6 +96,49 @@ def load_all(builtin_dir: Path, custom_dir: Path | None = None) -> tuple[list[Ru
             except (OSError, ValueError, json.JSONDecodeError) as exc:
                 errors.append({"file": str(path), "message": str(exc)})
     return rules, errors
+
+
+def _audit_db_file() -> Path | None:
+    """Locate the audit DB without creating the user data directory."""
+    current = db.audit_db_path
+    if current is not config_paths.audit_db_path:
+        try:
+            return Path(current())
+        except OSError:
+            return None
+    override = os.environ.get(ENV_OVERRIDE)
+    root = Path(override) if override else _resolve_data_dir()
+    return root / "audit.sqlite"
+
+
+def _read_disabled() -> frozenset[str]:
+    """Disabled rule ids stored by the operator. Missing DB means none."""
+    path = _audit_db_file()
+    if path is None or not path.is_file():
+        return frozenset()
+    try:
+        with db.connection() as connection:
+            found = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'rule_overrides'"
+            ).fetchone()
+            if found is None:
+                return frozenset()
+            rows = connection.execute(
+                "SELECT rule_id FROM rule_overrides WHERE enabled = 0"
+            ).fetchall()
+    except sqlite3.Error:
+        return frozenset()
+    return frozenset(str(row["rule_id"]) for row in rows)
+
+
+def _write_enabled(rule_id: str, enabled: bool) -> None:
+    db.init_db()
+    with db.connection() as connection:
+        connection.execute(
+            "INSERT INTO rule_overrides (rule_id, enabled) VALUES (?, ?) "
+            "ON CONFLICT(rule_id) DO UPDATE SET enabled = excluded.enabled",
+            (rule_id, 1 if enabled else 0),
+        )
 
 
 def record_hit(rule_id: str, cmd: str, *, conn: sqlite3.Connection | None = None) -> None:

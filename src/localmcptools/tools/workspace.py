@@ -24,9 +24,9 @@ import re
 from pathlib import Path
 from typing import Any, cast
 
+from ..execution.async_util import run_async, run_sync
 from ..execution.context import current_gate
 from ..execution.runner import run
-from ..execution.async_util import run_sync
 from ..persistence import artifacts
 from ..policy.approval import (
     ApprovalDigestMismatch,
@@ -312,7 +312,7 @@ def _run_preset(args: dict[str, Any], action: str) -> ToolResponse:
     approval_id = args.get("approval_id")
     digest = digest_for(tool, args, ws.id, profile.value)
     if not isinstance(approval_id, str) or not approval_id:
-        item = request(ws.id, capability, args, profile=profile.value)
+        item = request(ws.id, capability, args, profile=profile.value, preview=preview)
         fail(code="approval_required", message="human approval is required before running this preset", tool=tool, audit_id="pending", run_id="pending", workspace_id=ws.id, approval_id=item.id, data=preview)
     approval_id = cast(str, approval_id)
     try:

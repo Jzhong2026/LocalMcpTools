@@ -5,7 +5,8 @@ Public API:
 - :class:`Workspace` — value object returned by :func:`register`.
 - :func:`register(path, profile='observe')` — registers a directory and
   returns a :class:`Workspace`. Idempotent: registering the same
-  canonical root twice returns the *same* :class:`Workspace`.
+  canonical root twice returns the *same* :class:`Workspace` and
+  keeps any profile an operator already granted.
 - :func:`resolve(workspace_id)` — looks up by id; raises
   :class:`WorkspaceNotRegistered`.
 - :func:`list_workspaces()` — every row, for the UI.
@@ -173,7 +174,10 @@ def register(
     """Register ``path`` and return the :class:`Workspace`.
 
     Idempotent: a second call with the same canonical root returns the
-    existing row (and silently updates the notes / profile if they differ).
+    existing row. Notes are updated when they differ. The stored profile
+    is not: an operator grant must survive a later ``workspace.register``
+    from the agent. New rows still start at the supplied profile, which
+    the MCP tool always passes as ``observe``.
 
     Raises :class:`InvalidPath` for any safety-rejection reason.
     """
@@ -190,19 +194,21 @@ def register(
             (canonical,),
         ).fetchone()
         if existing is not None:
-            # Idempotent: keep the original id / registered_at. If the
-            # caller wants to change profile / notes, we honour that.
-            if (profile != existing["profile"]) or (notes != existing["notes"]):
+            # Keep the original id, registered_at, and profile. Profile
+            # is operator-owned; re-registration must not downgrade it.
+            stored_notes = existing["notes"]
+            if notes != stored_notes:
                 c.execute(
-                    "UPDATE workspaces SET profile = ?, notes = ? WHERE id = ?",
-                    (profile, notes, existing["id"]),
+                    "UPDATE workspaces SET notes = ? WHERE id = ?",
+                    (notes, existing["id"]),
                 )
+                stored_notes = notes
             return Workspace(
                 id=existing["id"],
                 canonical_root=existing["canonical_root"],
                 registered_at=existing["registered_at"],
-                profile=profile if profile != existing["profile"] else existing["profile"],
-                notes=notes if notes != existing["notes"] else existing["notes"],
+                profile=existing["profile"],
+                notes=stored_notes,
             )
         c.execute(
             "INSERT INTO workspaces (id, canonical_root, registered_at, profile, notes) "

@@ -551,7 +551,10 @@ def ui_click_element(args: dict[str, Any]) -> ToolResponse:
     approval_id = args.get("approval_id")
     digest = digest_for(tool, args, workspace_id, profile_value)
     if not isinstance(approval_id, str) or not approval_id:
-        approval = request(workspace_id, capability, args, profile=profile_value)
+        approval = request(
+            workspace_id, capability, args, profile=profile_value,
+            preview={"window_id": args.get("window_id"), "x": args.get("x"), "y": args.get("y")},
+        )
         fail(
             code="approval_required",
             message="human approval required before clicking",
@@ -605,7 +608,10 @@ def ui_type_text(args: dict[str, Any]) -> ToolResponse:
     approval_id = args.get("approval_id")
     digest = digest_for(tool, args, workspace_id, profile_value)
     if not isinstance(approval_id, str) or not approval_id:
-        approval = request(workspace_id, capability, args, profile=profile_value)
+        approval = request(
+            workspace_id, capability, args, profile=profile_value,
+            preview={"window_id": args.get("window_id"), "text": text},
+        )
         fail(code="approval_required", message="human approval required before typing", tool=tool, audit_id="pending", run_id="pending", workspace_id=workspace_id, approval_id=approval.id)
     approval_id = cast(str, approval_id)
     try:
@@ -650,7 +656,10 @@ def ui_act_and_verify(args: dict[str, Any]) -> ToolResponse:
     approval_id = args.get("approval_id")
     digest = digest_for(tool, args, workspace_id, profile_value)
     if not isinstance(approval_id, str) or not approval_id:
-        approval = request(workspace_id, capability, args, profile=profile_value)
+        approval = request(
+            workspace_id, capability, args, profile=profile_value,
+            preview={"action_type": args.get("action_type"), "window_id": args.get("window_id")},
+        )
         fail(code="approval_required", message="human approval required", tool=tool, audit_id="pending", run_id="pending", workspace_id=workspace_id, approval_id=approval.id)
     try:
         consume(approval_id, digest)

@@ -151,6 +151,18 @@ def test_register_preserves_original_id_on_idempotent_replay(fresh_db: Path, ws_
     assert second.notes == "updated"
 
 
+def test_reregister_preserves_previously_granted_profile(fresh_db: Path, ws_dir: Path) -> None:
+    """A later register() must not silently downgrade an operator grant."""
+    with db.connection(fresh_db) as conn:
+        first = register(ws_dir, conn=conn, profile="workspace_exec")
+        second = register(ws_dir, conn=conn, profile="observe", notes="again")
+        stored = resolve(first.id, conn=conn)
+    assert second.id == first.id
+    assert second.profile == "workspace_exec"
+    assert stored.profile == "workspace_exec"
+    assert second.notes == "again"
+
+
 # --- list_workspaces ordering ---------------------------------------------
 
 

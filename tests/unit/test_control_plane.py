@@ -237,14 +237,13 @@ async def test_rules_toggle_disables_then_re_enables(control_app: FastAPI) -> No
             headers={"X-LMCP-CSRF": cookie},
         )
         assert r.status_code == 200
-        # Now the engine should not match the disabled rule.
+        # A fresh engine (what shell.run_command builds per call) must
+        # observe the persisted disable, not an empty in-memory set.
         from localmcptools.safety.rules import RuleEngine
 
         engine = RuleEngine()
         engine.reload()
-        assert (
-            engine.match("Format-Volume -DriveLetter C") is not None
-        )  # engine doesn't share state, but shows it would
+        assert engine.match("Format-Volume -DriveLetter C") is None
         # Re-enable
         r = await client.patch(
             "/api/rules/block-format-volume",

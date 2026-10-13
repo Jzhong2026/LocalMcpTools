@@ -45,6 +45,7 @@ export interface RuleSummary {
   severity: string;
   suggestion: string;
   clauses: Array<Record<string, string>>;
+  enabled: boolean;
 }
 
 export interface RulesList {
@@ -52,6 +53,27 @@ export interface RulesList {
   hit_stats: Record<string, { rule_id: string; hit_count: number; last_hit_at: number; last_hit_cmd: string }>;
   builtin_dir: string;
   custom_dir: string | null;
+}
+
+export interface WorkspaceSummary {
+  workspace_id: string;
+  canonical_root: string;
+  profile: string;
+  registered_at: number;
+  notes: string | null;
+}
+
+export interface ApprovalSummary {
+  id: string;
+  workspace_id: string;
+  requested_capability: string;
+  action_digest: string;
+  status: string;
+  requested_at: number;
+  expires_at: number;
+  approved_at: number | null;
+  consumed_at: number | null;
+  preview: Record<string, unknown> | null;
 }
 
 export interface BackgroundSummary {
